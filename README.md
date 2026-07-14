@@ -108,6 +108,11 @@ The workflow writes that secret to `.env` before `docker compose up`.
 
 If `ENV_FILE` is missing (e.g. fork PRs), CI falls back to `.env.ci` and a **Cloudflare quick tunnel** (`*.trycloudflare.com`) so the job still proves external access.
 
+| CI mode | When | Compose | Public URL | Whoami auth |
+|---------|------|---------|------------|-------------|
+| **Named** | `ENV_FILE` has non-empty `TUNNEL_TOKEN` | `docker compose up` | `WHOAMI_HOST` / `whoami.$DOMAIN` (https) | On (forward-auth) — **302/401 is success** |
+| **Quick** | no secret or empty token | `+ docker-compose.ci.yml` | `*.trycloudflare.com` | Off (catch-all `:80`) |
+
 ### Per-service env catalogs
 
 Root `.env.example` = minimal keys the compose files actually use.  
@@ -122,7 +127,8 @@ Root `.env.example` = minimal keys the compose files actually use.
 | [`tailscale/.env.example`](tailscale/.env.example) | all `TS_*` Docker params |
 | [`networks/.env.example`](networks/.env.example) | network knobs (mostly hard-coded) |
 
-Copy extra keys from a service catalog into root `.env` **and** wire them in that service’s YAML if you need them at runtime.
+Copy **only** keys you need from a catalog into root `.env` (with real values).  
+Do **not** copy blank lines like `TINYAUTH_SERVER_SOCKETPATH=` — empty optional env can prevent Tinyauth/Caddy from starting (same risk in prod and CI).
 
 ### Important variables (minimal)
 
@@ -170,11 +176,14 @@ docker compose --profile core --profile tailscale up -d
 Workflow: `.github/workflows/test.yml`
 
 1. Writes `secrets.ENV_FILE` → `.env` (or `.env.ci`).
-2. Starts the stack (`docker-compose.ci.yml` for quick tunnel when no token).
+2. Starts the stack (`docker-compose.ci.yml` only for quick tunnel when no token).
 3. Runs `scripts/wait-and-test.sh`:
-   - waits for containers
+   - waits for `caddy`, `whoami`, `cloudflared`
    - discovers `https://*.trycloudflare.com` **or** uses `WHOAMI_HOST` for named tunnels
-   - `curl`s the public URL and requires HTTP 200/3xx/401
+   - `curl` **without** `-L` (does not follow login redirects)
+   - accepts HTTP **200 / 301 / 302 / 307 / 401 / 403** as “reachable”
+
+**Full production-like secret:** put a complete root `.env` in `ENV_FILE` (including `TUNNEL_TOKEN`, public `TINYAUTH_APPURL`, `WHOAMI_HOST`, hostnames on the Cloudflare tunnel). Smoke success with auth still on is typically **302** (redirect to login) or **401**, not necessarily 200.
 
 ## Multi-file compose without `include`
 
@@ -203,4 +212,5 @@ docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
 - Origin protocol is **HTTP**; Cloudflare (or Tailscale Serve) terminates TLS.
 - Tinyauth cookies are set on the parent of `TINYAUTH_APPURL` — use real subdomains (`auth.example.com` + `whoami.example.com`), not multi-level free DDNS hosts.
 - Do not commit `.env`. Only `.env.example` / `.env.ci` belong in git.
-- Coding agents and contributors: follow **`AGENTS.md`** (layout, scripts placement, env, CI rules).
+- When probing a protected app manually: first response **302/401** means the tunnel + Caddy path works; following redirects needs a browser or login flow.
+- Coding agents and contributors: follow **`AGENTS.md`** (layout, scripts, env injection rules, named vs quick CI).

@@ -1,22 +1,42 @@
 # =============================================================================
-# docker-compose.ci.yml — override cho CI / smoke test
+# docker-compose.ci.yml — override cho CI / smoke test (quick tunnel)
 # =============================================================================
 #
-# environment ở đây ghi đè env_file + environment của service yml (YAML thắng).
+# Dùng khi không có TUNNEL_TOKEN / secrets.ENV_FILE:
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
+#
+# - cloudflared: TryCloudflare (--url), ép HTTP/2 (UDP/QUIC hay lỗi trên GHA)
+# - whoami: catch-all :80, KHÔNG forward-auth (public URL phải curl được)
+# - tinyauth: host nội bộ, cookie không secure
+# - caddy: map host 8080→80 cho probe local
+#
+# environment / labels ở đây ghi đè service YAML (YAML thắng env_file).
 # =============================================================================
 
 services:
   cloudflared:
+    # Replace named-tunnel command entirely (list replace, not merge).
+    # Image ENTRYPOINT already includes: cloudflared --no-autoupdate
+    # Result: cloudflared --no-autoupdate tunnel --protocol http2 ... --url http://caddy:80
     command:
       - tunnel
-      - --no-autoupdate
+      - --protocol
+      - http2
+      - --edge-ip-version
+      - "4"
       - --url
       - http://caddy:80
     environment:
-      # Ép quick-tunnel: không dùng named token dù .env có TUNNEL_TOKEN
+      # Quick tunnel must not see a token (empty string can still confuse some versions)
       TUNNEL_TOKEN: ""
+      TUNNEL_TOKEN_FILE: ""
+      TUNNEL_TRANSPORT_PROTOCOL: http2
+      TUNNEL_EDGE_IP_VERSION: "4"
+      TUNNEL_LOGLEVEL: info
 
   whoami:
+    # Drop tinyauth_forwarder — otherwise unauthenticated requests 302 →
+    # TINYAUTH_APPURL (http://tinyauth.internal) and external curl -L fails.
     labels: !override
       caddy: ":80"
       caddy.reverse_proxy: "{{upstreams 80}}"
@@ -32,3 +52,7 @@ services:
   caddy:
     ports: !override
       - "8080:80"
+    environment:
+      # Ensure docker-proxy watches the shared network even if host .env is odd
+      CADDY_INGRESS_NETWORKS: proxy
+      CADDY_DOCKER_MODE: standalone

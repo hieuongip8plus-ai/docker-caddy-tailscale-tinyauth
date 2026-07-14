@@ -162,18 +162,47 @@ When adding a service, update **both** root `include` and this documented multi-
 5. Document every variable in `.env.example`.
 6. bcrypt / `$` in Compose: use **`$$`** in `.env` / compose so containers receive a single `$`.
 
+### Env injection rules (both prod and CI — do not regress)
+
+These rules apply to **full named-tunnel config** and **quick-tunnel CI** alike.
+
+1. **Never inject empty optional env via Compose `environment:`**  
+   Patterns like `FOO: ${FOO:-}` put `FOO=""` into the container. Many apps treat “set but empty” differently from “unset” (Tinyauth v5: `TINYAUTH_SERVER_SOCKETPATH=""`, empty OAuth client IDs; caddy-docker-proxy: empty `CADDY_DOCKER_*` paths).  
+   - **Required / stack defaults** with non-empty defaults → OK in `environment:`.  
+   - **Optional knobs** → only in root `.env` when the user actually needs them; arrive via `env_file`.  
+   - In catalogs (`<service>/.env.example`), keep unused optionals **commented out**, not `KEY=`.
+
+2. **Do not paste the full catalog into root `.env` with blank values.**  
+   `env_file` loads every `KEY=` line. Prefer root `.env.example` (minimal) and copy **only** keys you set.
+
+3. **Tinyauth-only keys for the process** must be documented `TINYAUTH_*`. Hostnames for Caddy labels use `TINYAUTH_HOST` / `CADDY_TINYAUTH_HOST` / `WHOAMI_HOST` — never invent process env for labels.
+
 ### Tinyauth v5 (strict)
 
 - Only **documented** `TINYAUTH_*` keys (see https://tinyauth.app/docs/reference/configuration/).
 - Unknown `TINYAUTH_*` keys make the process **refuse to start**.
+- Empty optional `TINYAUTH_*` (especially `TINYAUTH_SERVER_SOCKETPATH`, OAuth provider IDs) can also break bootstrap — omit the key entirely if unused.
 - Common keys: `TINYAUTH_APPURL`, `TINYAUTH_AUTH_USERS`, `TINYAUTH_AUTH_SECURECOOKIE`, `TINYAUTH_LOG_LEVEL`, `TINYAUTH_DATABASE_PATH`, `TINYAUTH_ANALYTICS_ENABLED`.
 - Do **not** invent `TINYAUTH_SECRET` / old v3 names.
+- Prod: `TINYAUTH_APPURL` must be the **public** `https://auth.<domain>` (cookie + redirects). CI quick mode may use `http://tinyauth.internal` only because whoami auth is stripped.
 
 ### Cloudflare
 
-- **Named tunnel (prod):** `TUNNEL_TOKEN` + dashboard Public Hostname → `http://caddy:80`.
-- **Quick tunnel (CI):** `docker-compose.ci.yml` overrides command to `--url http://caddy:80`.
+- **Named tunnel (prod / full ENV_FILE):** `TUNNEL_TOKEN` + dashboard Public Hostname → `http://caddy:80` for **auth** and **whoami** hosts. Compose: `tunnel run` (no `docker-compose.ci.yml`).
+- **Quick tunnel (no token / no secret):** `docker-compose.ci.yml` → `tunnel --url http://caddy:80`, prefer **HTTP/2** + IPv4 on GitHub runners; whoami becomes catch-all `:80` **without** `tinyauth_forwarder`.
 - Service container name / compose service: `cloudflared`.
+
+### Named vs quick — what breaks where
+
+| Issue | Full config (named + auth) | Quick CI (no config) |
+|-------|----------------------------|----------------------|
+| Empty optional env in YAML / `.env` | **Yes** — Tinyauth/Caddy can fail to start | **Yes** |
+| `curl -L` following auth redirect | Risky if `APPURL` wrong; OK if public `https://auth…` | **Fails** if forward-auth still on (redirect → internal host) |
+| Missing `TUNNEL_TOKEN` | cloudflared crash-loops (`tunnel run`) | Expected — use CI override |
+| Whoami protected by Tinyauth | **Intended** — public probe may get **302/401** | Must **disable** auth (CI `labels: !override`) |
+| QUIC on GHA | Rare flake with `protocol=auto` | Common — force `http2` in CI |
+
+Full config is **not** immune to empty-env / probe bugs; only the trycloudflare-specific pieces are CI-only.
 
 ### Tailscale
 
@@ -188,12 +217,19 @@ Workflow: `.github/workflows/test.yml`.
 Must:
 
 1. Materialize `.env` from `ENV_FILE` or `.env.ci`.
-2. Start stack (named or CI override).
-3. Run `scripts/wait-and-test.sh`.
-4. Fail if public URL is not reachable with acceptable HTTP codes (200, 301, 302, 307, 401, 403).
+2. Detect mode: `TUNNEL_TOKEN` non-empty → **named** (plain compose); else **quick** (`docker-compose.ci.yml`).
+3. Start stack; fail fast if `cloudflared` is not running.
+4. Run `scripts/wait-and-test.sh`:
+   - require `caddy`, `whoami`, `cloudflared` running;
+   - named: `PUBLIC_URL` from `WHOAMI_HOST` / `DOMAIN` (https);
+   - quick: extract `https://*.trycloudflare.com` from logs;
+   - **do not** `curl -L` (no redirect follow) — first hop 200/3xx/401/403 is enough to prove the edge;
+   - accept HTTP **200, 301, 302, 307, 401, 403**.
 5. Collect **per-service logs** into `ci-logs/` and upload as a GitHub Actions artifact (always, before tear down).
 6. Also dump recent logs to the job console on failure; tear down always.
 7. Never print secret values (only env **keys**).
+
+**Full ENV_FILE checklist for named CI:** `COMPOSE_PROFILES` includes `core` (or equivalent), non-empty `TUNNEL_TOKEN`, public hostnames on the tunnel, `WHOAMI_HOST` (or `DOMAIN`), valid `TINYAUTH_*` (public `APPURL`, users, secure cookie as needed).
 
 ### Log artifact layout (CI)
 
@@ -231,6 +267,10 @@ Artifact name pattern: `stack-logs-<run_id>-<run_attempt>` (retention 14 days).
 - Do not commit `.env` or real `TUNNEL_TOKEN` / `TS_AUTHKEY`.
 - Do not open host ports as the primary public path when Tunnel is the design; Tunnel is the outside entry.
 - Do not break the “reachable from outside” CI check without replacing it.
+- Do not reintroduce `environment: KEY: ${KEY:-}` for optional keys (empty-string injection).
+- Do not paste catalog files into root `.env` with blank `KEY=` lines.
+- Do not use `curl -L` in stack smoke tests (auth redirects break the check).
+- Do not leave `tinyauth_forwarder` on whoami in quick-tunnel CI (catch-all must be public).
 
 ## Common commands
 
@@ -253,9 +293,42 @@ docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
 ./caddy/scripts/dump-config.sh
 ```
 
+## Commit message template (git-o commithook) — bắt buộc khi kết thúc
+
+Repo này dùng hook **prepare-commit-msg** + **post-commit** (git-o / `setupgit commithook`):
+
+| Bước | Việc |
+|------|------|
+| 1 | Ghi **nội dung commit message** (mô tả công việc vừa xong) vào file **`.git/.git-o-commit-template`** |
+| 2 | Chạy **`git commit`** (hoặc `git commit` rồi lưu editor) — **không** dùng `git commit -m "..."` nếu muốn template được áp dụng |
+| 3 | Hook `prepare-commit-msg` chép nội dung template → message commit (chỉ commit thường; bỏ qua merge/squash/`-m`) |
+| 4 | Sau commit **thành công**, hook `post-commit` **clear** template |
+
+### Quy tắc cho agent / người làm việc trong repo
+
+1. **Trước khi coi task là xong**, nếu có thay đổi cần commit: **luôn ghi/cập nhật** `.git/.git-o-commit-template` với message rõ ràng (tiếng Việt hoặc Anh, complete sentences, nêu *what* + *why*).
+2. File nằm trong **`.git/`** — không commit vào tree; mỗi clone/máy có template riêng sau khi cài hook.
+3. **Không** clear template thủ công trước khi commit (hook post-commit lo sau khi commit OK; clear sớm sẽ mất message nếu user hủy commit).
+4. Nếu user bảo commit: ghi template **trước**, rồi mới `git commit` (không `-m` / không `--amend` trừ khi user yêu cầu).
+5. Message nên khớp diff thật; không mention tool/agent trừ khi user yêu cầu.
+
+### Ví dụ nội dung template
+
+```text
+Fix quick-tunnel CI and empty-env bootstrap for Tinyauth/Caddy.
+
+Force HTTP/2 on trycloudflare path, stop injecting empty optional
+TINYAUTH_*/CADDY_* vars, and smoke-test without curl -L so auth
+redirects do not fail the public reachability check. Document named
+vs quick modes in AGENTS.md and README.
+```
+
 ## Agent checklist before finishing a change
 
 - [ ] Service YAML named `<service>/<service>.yml`
+- [ ] No optional empty `environment:` injections; catalogs keep unused keys commented
+- [ ] Both paths still valid: **named** (`docker compose up`) and **quick** (`-f docker-compose.ci.yml`)
+- [ ] `wait-and-test.sh` still accepts 302/401 without following redirects
 - [ ] Service has `profiles` (own name + `core` and/or `full` as appropriate)
 - [ ] Scripts live in the correct directory (service vs stack-wide)
 - [ ] Root `include` list updated if services changed
@@ -263,3 +336,4 @@ docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
 - [ ] Root `.env.example` / `.env.ci` set `COMPOSE_PROFILES` appropriately
 - [ ] CI still covers external access
 - [ ] README and AGENTS.md still accurate
+- [ ] **Đã ghi nội dung cập nhật vào `.git/.git-o-commit-template`** (sẵn sàng `git commit` không `-m`)

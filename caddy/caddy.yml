@@ -6,6 +6,9 @@
 #   1) env_file ../.env  2) env_file ./.env  3) environment (YAML thắng)
 # Catalog: caddy/.env.example
 #
+# Không inject CADDY_DOCKER_* rỗng qua environment — empty string có thể bị
+# plugin coi là "đã cấu hình" và làm hỏng bootstrap. Optional: chỉ set trong .env.
+#
 # Profiles: caddy | core | full
 # Docs: https://github.com/lucaslorentz/caddy-docker-proxy#options
 # =============================================================================
@@ -24,25 +27,9 @@ services:
       - path: .env
         required: false
     environment:
-      # Stack default: ingress network `proxy` (ghi đè nếu .env set khác)
+      # Stack defaults only (non-empty). Extra CADDY_DOCKER_* via env_file/.env.
       CADDY_INGRESS_NETWORKS: ${CADDY_INGRESS_NETWORKS:-proxy}
       CADDY_DOCKER_MODE: ${CADDY_DOCKER_MODE:-standalone}
-      CADDY_DOCKER_LABEL_PREFIX: ${CADDY_DOCKER_LABEL_PREFIX:-}
-      CADDY_DOCKER_PROXY_SERVICE_TASKS: ${CADDY_DOCKER_PROXY_SERVICE_TASKS:-}
-      CADDY_DOCKER_PROCESS_CADDYFILE: ${CADDY_DOCKER_PROCESS_CADDYFILE:-}
-      CADDY_DOCKER_SCAN_STOPPED_CONTAINERS: ${CADDY_DOCKER_SCAN_STOPPED_CONTAINERS:-}
-      CADDY_DOCKER_POLLING_INTERVAL: ${CADDY_DOCKER_POLLING_INTERVAL:-}
-      CADDY_DOCKER_EVENT_THROTTLE_INTERVAL: ${CADDY_DOCKER_EVENT_THROTTLE_INTERVAL:-}
-      CADDY_DOCKER_LOG_LEVEL: ${CADDY_DOCKER_LOG_LEVEL:-}
-      CADDY_DOCKER_LOG_FORMAT: ${CADDY_DOCKER_LOG_FORMAT:-}
-      CADDY_DOCKER_CADDYFILE_PATH: ${CADDY_DOCKER_CADDYFILE_PATH:-}
-      CADDY_DOCKER_ENVFILE: ${CADDY_DOCKER_ENVFILE:-}
-      CADDY_DOCKER_SOCKETS: ${CADDY_DOCKER_SOCKETS:-}
-      CADDY_DOCKER_CERTS_PATH: ${CADDY_DOCKER_CERTS_PATH:-}
-      CADDY_DOCKER_APIS_VERSION: ${CADDY_DOCKER_APIS_VERSION:-}
-      CADDY_DOCKER_NO_SCOPE: ${CADDY_DOCKER_NO_SCOPE:-}
-      CADDY_CONTROLLER_NETWORK: ${CADDY_CONTROLLER_NETWORK:-}
-      CADDY_ADMIN: ${CADDY_ADMIN:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - caddy-data:/data

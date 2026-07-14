@@ -18,11 +18,8 @@ services:
         required: false
       - path: .env
         required: false
-    environment:
-      # Image whoami: biến tùy chọn (nếu có trong .env sẽ vào container)
-      WHOAMI_NAME: ${WHOAMI_NAME:-}
-      WHOAMI_PORT_NUMBER: ${WHOAMI_PORT_NUMBER:-}
-      PORT: ${PORT:-}
+    # Optional WHOAMI_NAME / PORT etc.: set only in root .env (env_file).
+    # Do not inject empty strings via environment: — omit key when unused.
     networks:
       - proxy
     labels:
