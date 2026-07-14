@@ -20,6 +20,7 @@ import { existsSync, readFileSync, statSync, appendFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "jsonc-parser";
+import { detectDocker, dockerCmd } from "./_docker.mjs";
 
 const allArgs = process.argv.slice(2);
 const DRY_RUN = allArgs.includes("--dry-run");
@@ -104,7 +105,7 @@ if (action === "restore") {
   log(`Images to cache: ${images.join(", ")}`);
   if (existsSync(TAR_PATH) && statSync(TAR_PATH).size > 0) {
     log("Loading cached images...");
-    run(`docker load -i ${TAR_PATH}`);
+    run(dockerCmd(`load -i ${TAR_PATH}`));
     log("Cache loaded.");
   } else {
     log("No cache found — images will be pulled fresh.");
@@ -117,9 +118,10 @@ if (action === "save") {
     log("Cache already exists — skipping save.");
     process.exit(0);
   }
+  const dcmd = dockerCmd("") || "docker";
   const local = images.filter((img) => {
     try {
-      execSync(`docker image inspect ${img}`, { stdio: "ignore" });
+      execSync(`${dcmd} image inspect ${img}`, { stdio: "ignore" });
       return true;
     } catch {
       return false;
@@ -130,7 +132,7 @@ if (action === "save") {
     process.exit(0);
   }
   log(`Saving ${local.length}/${images.length} local images to cache...`);
-  run(`docker save ${local.join(" ")} -o ${TAR_PATH}`);
+  run(dockerCmd(`save ${local.join(" ")} -o ${TAR_PATH}`));
   if (!DRY_RUN && existsSync(TAR_PATH)) {
     const size = statSync(TAR_PATH).size;
     log(`Saved ${(size / 1024 / 1024).toFixed(1)}MB.`);
