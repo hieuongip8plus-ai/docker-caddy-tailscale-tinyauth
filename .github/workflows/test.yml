@@ -107,22 +107,84 @@ jobs:
         if: always()
         run: node scripts/runners/analyze-workflow.mjs
 
-      - name: Opencode analysis instructions
+      - name: Analyze and report errors
         if: always()
         run: |
-          echo "## 🤖 Manual Opencode Analysis" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Download logs artifact and run locally:" >> "$GITHUB_STEP_SUMMARY"
-          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
-          echo "# Download artifact from this run" >> "$GITHUB_STEP_SUMMARY"
-          echo "# Extract and analyze with opencode" >> "$GITHUB_STEP_SUMMARY"
-          echo "node scripts/analyze-with-opencode.mjs" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Or manually with opencode:" >> "$GITHUB_STEP_SUMMARY"
-          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
-          echo "opencode 'Analyze CI logs in ci-logs/ directory. Check for errors, suggest improvements.'" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p ci-logs/analysis
+          echo "# Workflow Error Analysis" > ci-logs/analysis/errors.md
+          echo "" >> ci-logs/analysis/errors.md
+          echo "Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ci-logs/analysis/errors.md
+          echo "Run: $GITHUB_RUN_ID / Attempt: $GITHUB_RUN_ATTEMPT" >> ci-logs/analysis/errors.md
+          echo "" >> ci-logs/analysis/errors.md
+          
+          # Check container status
+          echo "## Container Status" >> ci-logs/analysis/errors.md
+          echo '```' >> ci-logs/analysis/errors.md
+          docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" >> ci-logs/analysis/errors.md 2>&1 || echo "docker ps failed" >> ci-logs/analysis/errors.md
+          echo '```' >> ci-logs/analysis/errors.md
+          echo "" >> ci-logs/analysis/errors.md
+          
+          # Scan logs for errors
+          echo "## Errors Detected" >> ci-logs/analysis/errors.md
+          echo "" >> ci-logs/analysis/errors.md
+          
+          ERROR_COUNT=0
+          for svc in caddy tinyauth whoami cloudflared tailscale; do
+            LOG="ci-logs/services/${svc}.log"
+            [ -f "$LOG" ] || continue
+            
+            # Find errors in logs
+            ERRORS=$(grep -i -n "error\|fatal\|panic\|exception\|failed\|crash" "$LOG" 2>/dev/null | head -20)
+            if [ -n "$ERRORS" ]; then
+              echo "### $svc" >> ci-logs/analysis/errors.md
+              echo '```' >> ci-logs/analysis/errors.md
+              echo "$ERRORS" >> ci-logs/analysis/errors.md
+              echo '```' >> ci-logs/analysis/errors.md
+              echo "" >> ci-logs/analysis/errors.md
+              ERROR_COUNT=$((ERROR_COUNT + $(echo "$ERRORS" | wc -l)))
+            fi
+          done
+          
+          if [ "$ERROR_COUNT" -eq 0 ]; then
+            echo "No errors found in logs." >> ci-logs/analysis/errors.md
+          else
+            echo "**Total errors found: $ERROR_COUNT**" >> ci-logs/analysis/errors.md
+          fi
+          echo "" >> ci-logs/analysis/errors.md
+          
+          # Check for specific failure patterns
+          echo "## Failure Patterns" >> ci-logs/analysis/errors.md
+          echo "" >> ci-logs/analysis/errors.md
+          
+          # Check TINYAUTH_AUTH_USERS error
+          if grep -q "TINYAUTH_AUTH_USERS" ci-logs/all-services.log 2>/dev/null; then
+            echo "- ❌ **TINYAUTH_AUTH_USERS missing** - Add to .env or use .env.ci fallback" >> ci-logs/analysis/errors.md
+          fi
+          
+          # Check network issues
+          if grep -qi "connection refused\|ECONNREFUSED\|network.*not found" ci-logs/all-services.log 2>/dev/null; then
+            echo "- ❌ **Network connectivity issues** - Check Docker networks and service dependencies" >> ci-logs/analysis/errors.md
+          fi
+          
+          # Check container crashes
+          if docker ps -a --filter "status=exited" --format "{{.Names}}" 2>/dev/null | grep -q .; then
+            echo "- ❌ **Containers exited** - Check container logs for crash details" >> ci-logs/analysis/errors.md
+          fi
+          
+          echo "" >> ci-logs/analysis/errors.md
+          
+          # Recommendations
+          echo "## Recommendations" >> ci-logs/analysis/errors.md
+          echo "" >> ci-logs/analysis/errors.md
+          echo "1. Download the \`stack-logs-*\` artifact" >> ci-logs/analysis/errors.md
+          echo "2. Review \`analysis/errors.md\` for error summary" >> ci-logs/analysis/errors.md
+          echo "3. Check per-service logs in \`services/\` directory" >> ci-logs/analysis/errors.md
+          echo "4. Run \`node scripts/analyze-with-opencode.mjs\` locally for deeper analysis" >> ci-logs/analysis/errors.md
+          
+          # Also output to summary
+          cat ci-logs/analysis/errors.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          
+          echo "Analysis saved to ci-logs/analysis/errors.md"
 
       - name: Upload logs artifact
         if: always()
