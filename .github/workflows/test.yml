@@ -5,6 +5,15 @@ on:
     branches: [main, master]
   pull_request:
   workflow_dispatch:
+    inputs:
+      keep_alive_minutes:
+        description: "Keep the stack up after the smoke test passes (minutes, 0 = off)"
+        required: false
+        default: "5"
+      keep_alive_interval:
+        description: "Heartbeat log interval while kept alive (minutes)"
+        required: false
+        default: "5"
 
 concurrency:
   group: stack-test-${{ github.ref }}
@@ -14,7 +23,9 @@ jobs:
   smoke:
     name: Compose up + external access
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Raised so keep_alive_minutes has room; a normal push/PR run still
+    # finishes in a couple minutes regardless of this ceiling.
+    timeout-minutes: 360
 
     steps:
       - name: Checkout
@@ -114,6 +125,28 @@ jobs:
           fi
           echo "## Container status" >> "$GITHUB_STEP_SUMMARY"
           docker compose ps >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Keep-alive heartbeat (manual runs only)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.keep_alive_minutes != '0'
+        env:
+          KEEP_MIN: ${{ github.event.inputs.keep_alive_minutes }}
+          INTERVAL_MIN: ${{ github.event.inputs.keep_alive_interval }}
+        run: |
+          set -euo pipefail
+          total=$(( KEEP_MIN * 60 ))
+          step=$(( INTERVAL_MIN * 60 ))
+          [ "$step" -le 0 ] && step=300
+          elapsed=0
+          url="$(cat public-url.txt 2>/dev/null || echo unknown)"
+          echo "Keeping stack alive for ${KEEP_MIN} minute(s), heartbeat every ${INTERVAL_MIN} minute(s)."
+          echo "Public URL: $url"
+          while [ "$elapsed" -lt "$total" ]; do
+            sleep "$step"
+            elapsed=$(( elapsed + step ))
+            echo "[heartbeat] $(date -u +%H:%M:%SZ) — ${elapsed}/${total}s elapsed — $url"
+            docker compose ps
+          done
+          echo "Keep-alive window finished — proceeding to teardown."
 
       - name: Collect per-service logs
         if: always()
