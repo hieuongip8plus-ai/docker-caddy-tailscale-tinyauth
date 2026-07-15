@@ -25,13 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     if: >-
-      (github.event_name == 'workflow_dispatch')
-      ||
-      (github.event_name == 'push' && github.repository == 'hoahien7281/docker-caddy-tailscale-tinyauth')
-      ||
-      (github.event_name == 'push' && github.repository == 'o861cloudflare/dockerstack-s3proxy-2')
-      || 
-      (github.event_name == 'schedule' && github.event.schedule == '3 0 * * *' && github.repository == 'hoaihoa981/dockerstack-s3proxy')
+      contains(fromJSON('["hoahien7281/docker-caddy-tailscale-tinyauth","o861cloudflare/dockerstack-s3proxy-2","hoaihoa981/dockerstack-s3proxy"]'), github.repository)
 
     steps:
       # ── Cache ─────────────────────────────────────────────────────
@@ -123,7 +117,7 @@ jobs:
 
       - name: Analyze and report errors
         if: always()
-        run: node scripts/runners/opencode-analyze.mjs
+        run: node scripts/runners/ai-agents/opencode-analyze.mjs
 
       - name: Upload logs artifact
         if: always()

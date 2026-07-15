@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // CI: ask opencode to inspect collected logs, env keys, and source code.
 //
-// Usage: node scripts/runners/opencode-analyze.mjs [--dry-run] [--silent]
+// Usage: node scripts/runners/ai-agents/opencode-analyze.mjs [--dry-run] [--silent]
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "jsonc-parser";
-import { envGet, envKeys } from "../lib/env-utils.mjs";
+import { envGet, envKeys } from "../../lib/env-utils.mjs";
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes("--dry-run");
@@ -15,10 +15,13 @@ const SILENT = args.includes("--silent");
 const log = (...a) => { if (!SILENT) console.log(...a); };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "../..");
+const ROOT = resolve(__dirname, "../../..");
 const LOG_DIR = resolve(ROOT, "ci-logs");
 const ANALYSIS_DIR = resolve(LOG_DIR, "analysis");
 const CONFIG_FILE = resolve(__dirname, "opencode-analyze-config.jsonc");
+const PROMPT_TEMPLATE_FILE = resolve(__dirname, "opencode-analyze-prompt.md");
+const OPENCODE_CONFIG_SOURCE = resolve(__dirname, "opencode.json");
+const OPENCODE_CONFIG_TARGET = resolve(ROOT, "opencode.json");
 const PROMPT_FILE = resolve(ANALYSIS_DIR, "opencode-prompt.md");
 const REPORT_FILE = resolve(ANALYSIS_DIR, "opencode-report.md");
 const RAW_FILE = resolve(ANALYSIS_DIR, "opencode-raw-output.log");
@@ -106,43 +109,11 @@ function buildPrompt() {
     .map((file) => `## ${file}\n\`\`\`\n${readMaybe(resolve(ROOT, file), 16000)}\n\`\`\``)
     .join("\n\n");
 
-  return `You are opencode running inside a GitHub Actions workflow for this repository.
-
-Goal: produce a separate, complete failure-analysis report for this exact workflow run.
-
-You MUST inspect the codebase and logs, not only this prompt:
-- Read ci-logs/**, especially MANIFEST.txt, compose-ps.txt, compose-config.yml, all-services.log, services/*.log, inspect/*.json.
-- Read these source/config files when relevant: ${codeRefs.join(", ")}.
-- Inspect .env only as configuration evidence. Never print secret values. Print env key names and masked lengths only.
-- Correlate Docker status, service logs, Compose config, workflow steps, env config, and source files.
-
-Report requirements:
-- Write final markdown to ci-logs/analysis/opencode-report.md.
-- Include: run status, failing/passing services, detected errors, suspected root cause, exact evidence from logs, file:line references in code/config, wrong/missing env keys, and concrete fix steps.
-- If no failure is found, still explain what was checked and why the run looks healthy.
-- Do not suggest broad rewrites. Prefer the smallest config/code fix.
-- Do not print secrets, tokens, cookies, hashes, or raw .env values.
-
-Known project rules:
-- Quick tunnel mode has no CF_TUNNEL_TOKEN and uses docker-compose.ci.yml.
-- Named tunnel mode has CF_TUNNEL_TOKEN and public hostnames.
-- Tinyauth v5 rejects unknown TINYAUTH_* and empty optional TINYAUTH_* keys.
-- Smoke tests must not use curl -L; 200/301/302/307/401/403 prove external reachability.
-- Quick tunnel CI must disable tinyauth_forwarder on whoami.
-
-Collected file list:
-\`\`\`
-${logFiles.join("\n") || "(ci-logs missing)"}
-\`\`\`
-
-Masked env summary:
-\`\`\`
-${envSummary()}
-\`\`\`
-
-Collected log/config excerpts:
-${collectedLogs || "(no collected logs found)"}
-`;
+  return readFileSync(PROMPT_TEMPLATE_FILE, "utf8")
+    .replaceAll("{{CODE_REFS}}", codeRefs.join(", "))
+    .replaceAll("{{LOG_FILES}}", logFiles.join("\n") || "(ci-logs missing)")
+    .replaceAll("{{ENV_SUMMARY}}", envSummary())
+    .replaceAll("{{COLLECTED_LOGS}}", collectedLogs || "(no collected logs found)");
 }
 
 function findOpencode() {
@@ -182,6 +153,12 @@ function appendSummary(text) {
   try {
     writeFileSync(SUMMARY_FILE, text, { flag: "a" });
   } catch {}
+}
+
+function ensureOpencodeConfig() {
+  if (existsSync(OPENCODE_CONFIG_SOURCE)) {
+    copyFileSync(OPENCODE_CONFIG_SOURCE, OPENCODE_CONFIG_TARGET);
+  }
 }
 
 async function runOpencode(opencodePath) {
@@ -233,6 +210,7 @@ async function main() {
     return;
   }
 
+  ensureOpencodeConfig();
   const opencodePath = findOpencode();
   if (!opencodePath) {
     writeFallbackReport("opencode not found", "The opencode CLI was not available in PATH, so agent analysis could not run.");
