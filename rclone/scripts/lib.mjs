@@ -85,7 +85,7 @@ export function paths(env, config) {
 
 export function configText(item) {
   if (item.configBase64) return Buffer.from(item.configBase64, "base64").toString("utf8");
-  return item.configRaw;
+  return item.configRaw.replaceAll("\\n", "\n");
 }
 
 export function writeConfigs(items, runtimeRoot, dryRun, log) {

@@ -166,6 +166,13 @@ secret_access_key = ...
 endpoint = https://..."
 ```
 
+Hoặc viết một dòng với `\n`; script sẽ đổi thành newline thật trước khi ghi
+`/config/rclone/<index>-<name>.conf`:
+
+```env
+RCLONE_0_CONFIG_RAW="[remote]\ntype = s3\nprovider = Other\n..."
+```
+
 ## Hiệu năng
 
 Jobs chạy song song. Default trong `rclone/scripts/rclone.jsonc`:
