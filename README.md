@@ -161,6 +161,10 @@ Caddy routes by `Host` header; Cloudflare only needs to send traffic to `caddy:8
 ## Tailscale (optional)
 
 ```bash
+# chuẩn bị ACL tags + HTTPS + tailscale/serve.json
+node tailscale/scripts/init.mjs --env .env --dry-run
+node tailscale/scripts/init.mjs --env .env
+
 # .env: COMPOSE_PROFILES=full   hoặc   core,tailscale
 docker compose up -d
 # CLI:
@@ -168,8 +172,10 @@ docker compose --profile core --profile tailscale up -d
 ```
 
 - Uses userspace networking (`TS_USERSPACE=true`) — no host kernel module required.
-- `tailscale/serve.json` proxies HTTPS on the Tailscale node to `http://caddy:80`.
-- Approve the node / tags in the Tailscale admin console if required.
+- `tailscale/serve.json` proxies HTTPS on the Tailscale node directly to each service from `tailscale/scripts/init.jsonc`.
+- Private hosts use `<service>.<TS_TAILNET>` (for example `files.example.ts.net`) and do not go through Tinyauth labels.
+- ACL flow: `.env` + `tailscale/acl.sample.hujson` renders `tailscale/acl.hujson`, then init uploads `acl.hujson` to remote Tailscale ACL.
+- `TS_CLIENT_ID` / `TS_CLIENT_SECRET` are the single Trust Credentials pair for API init and machine join.
 
 ## CI
 

@@ -54,7 +54,7 @@ README.md                # Human-facing docs
 
 | Kind         | Location                | Examples                                                                                                                                                                                      |
 | ------------ | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Service-only | `<service>/scripts/*`   | `tinyauth/scripts/generate-user.mjs`, `cloudflare/scripts/provision-tunnel.mjs`, `cloudflare/scripts/extract-tunnel-url.mjs`, `tailscale/scripts/status.mjs`, `caddy/scripts/dump-config.mjs` |
+| Service-only | `<service>/scripts/*`   | `tinyauth/scripts/generate-user.mjs`, `cloudflare/scripts/provision-tunnel.mjs`, `cloudflare/scripts/extract-tunnel-url.mjs`, `tailscale/scripts/init.mjs`, `tailscale/scripts/status.mjs`, `caddy/scripts/dump-config.mjs` |
 | Stack-wide   | `scripts/*.mjs`         | `scripts/up.mjs`, `scripts/wait-and-test.mjs`                                                                                                                                                 |
 | CI / runner  | `scripts/runners/*.mjs` | `scripts/runners/setup-env.mjs`, `scripts/runners/start-stack.mjs`, `scripts/runners/collect-logs.mjs`, `scripts/runners/cache-docker-build-github.mjs`                                       |
 
@@ -389,6 +389,8 @@ docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
 # Service helpers
 ./tinyauth/scripts/generate-user.mjs
 ./cloudflare/scripts/extract-tunnel-url.mjs
+./tailscale/scripts/init.mjs --env .env --dry-run
+./tailscale/scripts/init.mjs --env .env
 ./tailscale/scripts/status.mjs
 ./caddy/scripts/dump-config.mjs
 ```

@@ -1,0 +1,10 @@
+{
+  // Private Tailscale Serve routes. Hostnames become <name>.<TS_TAILNET>.
+  // These bypass Caddy/Tinyauth and proxy directly to the service container.
+  "services": [
+    { "name": "auth", "upstream": "http://tinyauth:3000" },
+    { "name": "files", "upstream": "http://files:80" },
+    { "name": "ttyd", "upstream": "http://ttyd:7681" },
+    { "name": "whoami", "upstream": "http://whoami:80" }
+  ]
+}

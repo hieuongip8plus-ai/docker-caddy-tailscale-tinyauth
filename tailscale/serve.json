@@ -5,10 +5,31 @@
     }
   },
   "Web": {
-    "${TS_CERT_DOMAIN}:443": {
+    "auth.tailaa8079.ts.net:443": {
       "Handlers": {
         "/": {
-          "Proxy": "http://caddy:80"
+          "Proxy": "http://tinyauth:3000"
+        }
+      }
+    },
+    "files.tailaa8079.ts.net:443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://files:80"
+        }
+      }
+    },
+    "ttyd.tailaa8079.ts.net:443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://ttyd:7681"
+        }
+      }
+    },
+    "whoami.tailaa8079.ts.net:443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://whoami:80"
         }
       }
     }
