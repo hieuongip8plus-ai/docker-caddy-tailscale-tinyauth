@@ -366,6 +366,8 @@ ci-logs/
 
 Artifact name pattern: `stack-logs-<run_id>-<run_attempt>` (retention 14 days).
 
+Security rule: CI artifacts and AI-analysis prompts must never contain raw secrets from `.env`, `docker compose config`, `docker inspect`, or service logs. Redact token/secret/key/auth/password/cookie/account/client values before writing files under `ci-logs/` or streaming opencode output.
+
 ## Adding a new service
 
 1. Create `<name>/` with `<name>.yml` (header: purpose + doc links + examples).

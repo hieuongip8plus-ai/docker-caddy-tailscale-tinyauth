@@ -41,6 +41,12 @@ function sh(cmd) {
   return execSync(cmd, { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] }).toString().trim();
 }
 
+function redactSecrets(value) {
+  return value
+    .replace(/^(\s*-?\s*["']?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASS|AUTH|KEY|COOKIE|CREDENTIAL|ACCOUNT_ID|CLIENT_ID|CLIENT_SECRET|USERS)[A-Z0-9_]*["']?\s*[:=]\s*).+$/gmi, "$1[REDACTED]")
+    .replace(/("?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASS|AUTH|KEY|COOKIE|CREDENTIAL|ACCOUNT_ID|CLIENT_ID|CLIENT_SECRET|USERS)[A-Z0-9_]*"?=)[^",\]\s]+/gi, "$1[REDACTED]");
+}
+
 // chmod scripts
 try { run("bash -c 'chmod +x scripts/*.sh */scripts/*.sh 2>/dev/null || chmod +x scripts/*.sh'"); } catch {}
 
@@ -61,7 +67,7 @@ if (MODE === "named") {
       for (const line of block) {
         if (/^  cloudflared:/.test(line)) printing = true;
         else if (printing && /^  [a-z]/.test(line)) break;
-        if (printing) log(line);
+        if (printing) log(redactSecrets(line));
       }
     } catch {}
   }

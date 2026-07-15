@@ -41,6 +41,12 @@ function sh(cmd) {
   }
 }
 
+function redactSecrets(value) {
+  return value
+    .replace(/^(\s*-?\s*["']?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASS|AUTH|KEY|COOKIE|CREDENTIAL|ACCOUNT_ID|CLIENT_ID|CLIENT_SECRET|USERS)[A-Z0-9_]*["']?\s*[:=]\s*).+$/gmi, "$1[REDACTED]")
+    .replace(/("?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASS|AUTH|KEY|COOKIE|CREDENTIAL|ACCOUNT_ID|CLIENT_ID|CLIENT_SECRET|USERS)[A-Z0-9_]*"?=)[^",\]\s]+/gi, "$1[REDACTED]");
+}
+
 // Discover services dynamically from running containers
 const running = sh(dockerCmd('ps --format "{{.Names}}"')).split("\n").filter(Boolean);
 const all = sh(dockerCmd('ps -a --format "{{.Names}}"')).split("\n").filter(Boolean);
@@ -57,25 +63,25 @@ const ps = run(dockerCmd("compose ps -a")) + "\n\n" +
   run(dockerCmd('ps -a --filter "label=com.docker.compose.project"'));
 writeFileSync(`${LOG_DIR}/compose-ps.txt`, ps);
 
-writeFileSync(`${LOG_DIR}/compose-config.yml`, run(dockerCmd("compose config")));
+writeFileSync(`${LOG_DIR}/compose-config.yml`, redactSecrets(run(dockerCmd("compose config"))));
 
 if (existsSync(resolve(ROOT, "public-url.txt"))) {
   copyFileSync(resolve(ROOT, "public-url.txt"), `${LOG_DIR}/public-url.txt`);
 }
 
 // All services combined log
-writeFileSync(`${LOG_DIR}/all-services.log`, run(dockerCmd("compose logs --no-color --timestamps")));
+writeFileSync(`${LOG_DIR}/all-services.log`, redactSecrets(run(dockerCmd("compose logs --no-color --timestamps"))));
 
 // Per-service logs + inspect
 for (const svc of services) {
   console.log(`Collecting logs for: ${svc}`);
   const svcLog = run(dockerCmd(`compose logs --no-color --timestamps ${svc}`));
-  writeFileSync(`${LOG_DIR}/services/${svc}.log`, svcLog || "(no logs or service not in this run)\n");
+  writeFileSync(`${LOG_DIR}/services/${svc}.log`, redactSecrets(svcLog || "(no logs or service not in this run)\n"));
 
   const cid = sh(dockerCmd(`ps -aq --filter "name=^${svc}$"`) + " | head -1");
   if (cid) {
-    writeFileSync(`${LOG_DIR}/inspect/${svc}.json`, run(dockerCmd(`inspect ${cid}`)) || "{}");
-    writeFileSync(`${LOG_DIR}/services/${svc}.docker-logs.log`, run(dockerCmd(`logs --timestamps ${cid}`)));
+    writeFileSync(`${LOG_DIR}/inspect/${svc}.json`, redactSecrets(run(dockerCmd(`inspect ${cid}`)) || "{}"));
+    writeFileSync(`${LOG_DIR}/services/${svc}.docker-logs.log`, redactSecrets(run(dockerCmd(`logs --timestamps ${cid}`))));
   } else {
     writeFileSync(`${LOG_DIR}/inspect/${svc}.json`, '{"note":"container not found"}');
   }
