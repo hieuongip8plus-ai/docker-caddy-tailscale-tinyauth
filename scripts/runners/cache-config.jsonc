@@ -11,6 +11,7 @@
     "webssh/webssh.yml",
     "webssh/Dockerfile",
     "tailscale/tailscale.yml",
-    "docker-compose.ci.yml"
-  ]
+    "litestream/litestream.yml",
+    "docker-compose.ci.yml",
+  ],
 }

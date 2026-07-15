@@ -25,7 +25,9 @@ import { detectDocker, dockerCmd } from "./_docker.mjs";
 const allArgs = process.argv.slice(2);
 const DRY_RUN = allArgs.includes("--dry-run");
 const SILENT = allArgs.includes("--silent");
-const log = (...a) => { if (!SILENT) console.log(...a); };
+const log = (...a) => {
+  if (!SILENT) console.log(...a);
+};
 const action = allArgs.find((a) => !a.startsWith("--"));
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -67,14 +69,24 @@ function imageList() {
     if (!existsSync(p)) continue;
     for (const line of readFileSync(p, "utf8").split("\n")) {
       const m = line.match(/^\s+image:\s*(.+?)\s*$/);
-      if (m) set.add(m[1]);
+      if (!m) continue;
+      let img = m[1];
+      // Resolve Compose ${VAR:-default} syntax to its default so
+      // `docker inspect`/`docker save` receive a real, resolvable tag.
+      const varMatch = img.match(/^\$\{[A-Z0-9_]+:-(.+)\}$/);
+      if (varMatch) img = varMatch[1];
+      if (img.startsWith("$")) continue; // unresolved var with no default — skip
+      set.add(img);
     }
   }
   return [...set];
 }
 
 function run(cmd) {
-  if (DRY_RUN) { log(`[DRY RUN] ${cmd}`); return; }
+  if (DRY_RUN) {
+    log(`[DRY RUN] ${cmd}`);
+    return;
+  }
   execSync(cmd, { stdio: SILENT ? "ignore" : "inherit" });
 }
 
