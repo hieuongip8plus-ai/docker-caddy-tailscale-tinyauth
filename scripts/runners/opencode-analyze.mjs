@@ -187,7 +187,7 @@ function appendSummary(text) {
 async function runOpencode(opencodePath) {
   const shortPrompt = "Analyze this CI run. Read the attached prompt and repository files. Write the final markdown report to ci-logs/analysis/opencode-report.md.";
   return new Promise((resolve) => {
-    const proc = spawn(opencodePath, ["run", "--auto", "--file", PROMPT_FILE, shortPrompt], {
+    const proc = spawn(opencodePath, ["run", shortPrompt, "--auto", "--file", PROMPT_FILE], {
       cwd: ROOT,
       env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
       shell: false,
@@ -229,7 +229,7 @@ async function main() {
   log(`Prompt saved: ${PROMPT_FILE}`);
 
   if (DRY_RUN) {
-    log(`[DRY RUN] Would run opencode run --auto --file ${PROMPT_FILE}`);
+    log(`[DRY RUN] Would run opencode run <message> --auto --file ${PROMPT_FILE}`);
     return;
   }
 
