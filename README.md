@@ -129,7 +129,7 @@ Root `.env.example` = minimal keys the compose files actually use.
 | [`whoami/.env.example`](whoami/.env.example) | `WHOAMI_HOST` / labels |
 | [`dozzle/.env.example`](dozzle/.env.example) | `DOZZLE_HOST` / labels |
 | [`filebrowser/.env.example`](filebrowser/.env.example) | `FILEBROWSER_HOST` / workspace mount notes |
-| [`webssh/.env.example`](webssh/.env.example) | `WEBSSH_HOST` / ttyd + tmux notes |
+| [`webssh/.env.example`](webssh/.env.example) | `WEBSSH_HOSTS` / ttyd + tmux notes |
 | [`tailscale/.env.example`](tailscale/.env.example) | all `TS_*` Docker params |
 | [`networks/.env.example`](networks/.env.example) | network knobs (mostly hard-coded) |
 
@@ -149,7 +149,7 @@ Do **not** copy blank lines like `TINYAUTH_SERVER_SOCKETPATH=` — empty optiona
 | `WHOAMI_HOST` | Caddy site for the demo app |
 | `DOZZLE_HOST` | Caddy site for protected Docker logs |
 | `FILEBROWSER_HOST` | Caddy site for protected repo file browser |
-| `WEBSSH_HOST` | Caddy site for protected ttyd/tmux terminal |
+| `WEBSSH_HOSTS` | Caddy sites for protected ttyd/tmux terminal |
 | `TS_AUTHKEY` | Tailscale auth key (profile `tailscale`) |
 
 ## Cloudflare named tunnel setup
@@ -165,6 +165,7 @@ Do **not** copy blank lines like `TINYAUTH_SERVER_SOCKETPATH=` — empty optiona
    | `dozzle.example.com` | `http://caddy:80` |
    | `files.example.com` | `http://caddy:80` |
    | `ttyd.example.com` | `http://caddy:80` |
+   | `webssh.example.com` | `http://caddy:80` |
 
 4. DNS can be managed by Cloudflare when you add hostnames on the tunnel.
 

@@ -13,7 +13,7 @@
 #
 # Env/catalog:
 #   - webssh/.env.example
-#   - WEBSSH_HOST defaults to http://ttyd.${DOMAIN}
+#   - WEBSSH_HOSTS defaults to http://ttyd.${DOMAIN}, http://webssh.${DOMAIN}
 #
 # Profiles: webssh | full
 # =============================================================================
@@ -38,7 +38,7 @@ services:
     networks:
       - proxy
     labels:
-      caddy: ${CADDY_WEBSSH_HOST:-${WEBSSH_HOST:-http://ttyd.${DOMAIN:-localhost}}}
+      caddy: ${CADDY_WEBSSH_HOSTS:-${WEBSSH_HOSTS:-http://ttyd.${DOMAIN:-localhost}, http://webssh.${DOMAIN:-localhost}}}
       caddy.reverse_proxy: "{{upstreams 7681}}"
       caddy.import: tinyauth_forwarder *
     profiles:

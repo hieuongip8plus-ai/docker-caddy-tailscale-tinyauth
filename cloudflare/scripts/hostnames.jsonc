@@ -5,6 +5,7 @@
     "auth", // Tinyauth login page
     "files", // Filebrowser
     "ttyd", // WebSSH/ttyd terminal
+    "webssh", // WebSSH/ttyd terminal
     "whoami",
     "dozzle", // Docker logs
   ],
