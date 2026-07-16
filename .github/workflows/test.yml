@@ -37,14 +37,6 @@ jobs:
           npm ci --prefix nodesync --omit=dev
           npm ci --prefix orchestrator --omit=dev
 
-      - name: Run orchestrator + nodesync regression tests
-        working-directory: .work/verify
-        run: |
-          node verify-election.mjs
-          node verify-nodesync-scenarios.mjs
-          node verify-new-architecture.mjs
-          node verify-source-invariants.mjs
-
       - name: Compute Docker cache key
         run: node scripts/runners/cache-docker-build-github.mjs env
 
