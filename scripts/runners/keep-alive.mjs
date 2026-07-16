@@ -12,7 +12,9 @@ import { redactSecrets } from "../lib/redact-utils.mjs";
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes("--dry-run");
 const SILENT = args.includes("--silent");
-const log = (...a) => { if (!SILENT) console.log(...a); };
+const log = (...a) => {
+  if (!SILENT) console.log(...a);
+};
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../..");
@@ -39,7 +41,9 @@ function num(value, fallback) {
 function sh(cmd) {
   if (DRY_RUN) return "";
   try {
-    return execSync(cmd, { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] }).toString().trim();
+    return execSync(cmd, { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] })
+      .toString()
+      .trim();
   } catch (e) {
     return (e.stdout || e.stderr || "").toString().trim();
   }
@@ -50,7 +54,10 @@ function expand(value) {
 }
 
 function splitUrls(value) {
-  return expand(value).split(",").map((url) => url.trim()).filter(Boolean);
+  return expand(value)
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean);
 }
 
 function authUrl() {
@@ -77,8 +84,14 @@ function mask(value) {
 function formatBody(body) {
   const trimmed = String(body || "").trim();
   if (!trimmed) return "";
-  if (trimmed.startsWith("<")) return trimmed.split(/\r?\n/)[0];
+
+  // Any HTML response (has <!doctype html> or is wrapped in <html>...) -> fixed short marker
+  if (/<!doctype\s+html/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) {
+    return "<!doctype html>";
+  }
+
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed;
+
   return trimmed.slice(0, 500);
 }
 
@@ -102,7 +115,10 @@ async function login(timeoutSeconds) {
     return { ok: false, reason: "config" };
   }
   const endpoint = `${url.replace(/\/$/, "")}/api/user/login`;
-  if (DRY_RUN) { log(`[DRY RUN] POST ${endpoint}`); return { ok: true, reason: "dry-run" }; }
+  if (DRY_RUN) {
+    log(`[DRY RUN] POST ${endpoint}`);
+    return { ok: true, reason: "dry-run" };
+  }
 
   const { signal, cancel } = withTimeout(timeoutSeconds);
   let res;
@@ -123,9 +139,12 @@ async function login(timeoutSeconds) {
     cancel();
   }
 
-  const setCookies = typeof res.headers.getSetCookie === "function"
-    ? res.headers.getSetCookie()
-    : (res.headers.get("set-cookie") ? [res.headers.get("set-cookie")] : []);
+  const setCookies =
+    typeof res.headers.getSetCookie === "function"
+      ? res.headers.getSetCookie()
+      : res.headers.get("set-cookie")
+        ? [res.headers.get("set-cookie")]
+        : [];
   const body = await res.text().catch(() => "");
 
   log(`[auth] ${endpoint} -> HTTP ${res.status}`);
@@ -170,7 +189,10 @@ async function verifyCookie(urls, timeoutSeconds) {
 }
 
 async function checkUrl(item, timeoutSeconds, useCookie) {
-  if (DRY_RUN) { log(`[DRY RUN] GET ${item.url}`); return; }
+  if (DRY_RUN) {
+    log(`[DRY RUN] GET ${item.url}`);
+    return;
+  }
   const { signal, cancel } = withTimeout(timeoutSeconds);
   let res;
   try {
@@ -211,7 +233,9 @@ function showLogs(since) {
 
 const config = loadConfig();
 const keepSeconds = Math.round(num(env.KEEP_SECONDS, num(env.KEEP_MIN, num(env.KEEP_ALIVE_MINUTES, config.default_keep_minutes)) * 60));
-const intervalSeconds = Math.round(num(env.KEEP_INTERVAL_SECONDS, num(env.INTERVAL_SECONDS, num(env.INTERVAL_MIN, config.default_interval_seconds / 60) * 60)));
+const intervalSeconds = Math.round(
+  num(env.KEEP_INTERVAL_SECONDS, num(env.INTERVAL_SECONDS, num(env.INTERVAL_MIN, config.default_interval_seconds / 60) * 60)),
+);
 const publicUrl = existsSync(resolve(ROOT, "public-url.txt")) ? readFileSync(resolve(ROOT, "public-url.txt"), "utf8").trim() : "unknown";
 
 if (!detectDocker().available) {
@@ -223,7 +247,7 @@ log(`Keeping stack alive for ${keepSeconds}s, heartbeat every ${intervalSeconds}
 const loginResult = await login(config.curl_timeout_seconds);
 if (!loginResult.ok) log(`[auth] not authenticated (reason: ${loginResult.reason}) — service checks will run without a cookie and may show 401s`);
 const initialUrls = serviceUrls(config);
-const loggedIn = loginResult.ok && Boolean(sessionCookie) && await verifyCookie(initialUrls, config.curl_timeout_seconds);
+const loggedIn = loginResult.ok && Boolean(sessionCookie) && (await verifyCookie(initialUrls, config.curl_timeout_seconds));
 
 let elapsed = 0;
 let since = new Date().toISOString();
