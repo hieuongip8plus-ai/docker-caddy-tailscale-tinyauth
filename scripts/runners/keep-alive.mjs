@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // scripts/runners/keep-alive.mjs
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "jsonc-parser";
@@ -19,9 +18,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../..");
 const CONFIG_FILE = resolve(__dirname, "keep-alive-config.jsonc");
 const env = { ...parseEnv(resolve(ROOT, ".env")), ...process.env };
-const COOKIE_FILE = resolve(tmpdir(), `tinyauth-cookies-${process.pid}.txt`);
 
 process.chdir(ROOT);
+
+// Session cookie kept in memory — no cookie-jar file, no shell quoting of
+// "-H Cookie: ..." strings, nothing that can be mis-escaped.
+let sessionCookie = "";
 
 function loadConfig() {
   const defaults = { default_keep_minutes: 5, default_interval_seconds: 30, services: [], curl_timeout_seconds: 12 };
@@ -64,95 +66,6 @@ function serviceUrls(config) {
   return urls;
 }
 
-function login(timeout) {
-  const url = authUrl();
-  const username = env.TINYAUTH_CI_USER;
-  const password = env.TINYAUTH_CI_PASSWORD;
-  log(`[auth] url=${url || "(missing)"} user=${username || "(missing)"} password=${password ? "<hidden>" : "(missing)"}`);
-  if (!url || !username || !password) {
-    log("[auth] skipped: missing TINYAUTH_APPURL / TINYAUTH_CI_USER / TINYAUTH_CI_PASSWORD");
-    return { ok: false, reason: "config" };
-  }
-  const bodyFile = resolve(tmpdir(), `tinyauth-login-${process.pid}.json`);
-  const headersFile = resolve(tmpdir(), `tinyauth-login-${process.pid}.headers`);
-  const responseFile = resolve(tmpdir(), `tinyauth-login-${process.pid}.body`);
-  writeFileSync(bodyFile, JSON.stringify({ username, password }));
-  const cmd = `curl -k -sS -D "${headersFile}" -c "${COOKIE_FILE}" -o "${responseFile}" -w "%{http_code}" --max-time ${timeout} -X POST -H "Content-Type: application/json" --data-binary "@${bodyFile}" "${url.replace(/\/$/, "")}/api/user/login"`;
-  if (DRY_RUN) { log(`[DRY RUN] ${cmd.replace(password, "<password>")}`); return { ok: true, reason: "dry-run" }; }
-
-  // curl's own exit code (transport-level: DNS/connect/timeout) is separate from
-  // the HTTP status it received (application-level: wrong creds, server error...).
-  let code = "ERR";
-  let curlExit = 0;
-  try {
-    code = execSync(cmd, { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] }).toString().trim();
-  } catch (e) {
-    curlExit = e.status ?? 1;
-    code = (e.stdout || "").toString().trim() || "ERR";
-  }
-
-  if (curlExit !== 0) {
-    // curl never got a response at all: host unreachable, connection refused, timed out...
-    // this is "mạng chưa thông", not an auth problem — no HTTP status exists to blame.
-    log(`[auth] network error reaching ${url} (curl exit code ${curlExit})`);
-    return { ok: false, reason: "network", curlExit };
-  }
-
-  log(`[auth] ${url}/api/user/login -> HTTP ${code}`);
-  showHttpDebug("auth", headersFile, responseFile);
-  log(`[auth] cookies=${cookieNames().join(",") || "(none)"}`);
-
-  if (code === "401" || code === "403" || code === "422") {
-    return { ok: false, reason: "credentials", httpCode: code };
-  }
-  if (!/^[23]\d\d$/.test(code) && !cookieHeader()) {
-    return { ok: false, reason: "unexpected", httpCode: code };
-  }
-  if (!existsSync(COOKIE_FILE) || !cookieHeader()) {
-    // Login endpoint said success but never actually gave us a session cookie.
-    log("[auth] login returned success but no cookie was written — treating as failed");
-    return { ok: false, reason: "no-cookie" };
-  }
-  return { ok: true, reason: "ok" };
-}
-
-function verifyCookie(urls, timeout) {
-  const probe = urls[0];
-  if (!probe) return true;
-  const header = cookieHeader();
-  const cookie = header ? `-H "Cookie: ${header}"` : "";
-  const headersFile = resolve(tmpdir(), `tinyauth-verify-${process.pid}.headers`);
-  const responseFile = resolve(tmpdir(), `tinyauth-verify-${process.pid}.body`);
-  const cmd = `curl -k -sS ${cookie} -D "${headersFile}" -o "${responseFile}" -w "%{http_code}" --max-time ${timeout} "${probe.url}"`;
-  const code = sh(cmd) || "ERR";
-  log(`[auth] cookie check via ${probe.url} -> HTTP ${code}`);
-  showHttpDebug("auth-verify", headersFile, responseFile);
-  if (code === "401" || code === "403") {
-    log("[auth] login succeeded but cookie doesn't authorize requests — check that TINYAUTH_APPURL shares a parent domain with the app URLs");
-    return false;
-  }
-  return true;
-}
-
-function cookieRows() {
-  if (!existsSync(COOKIE_FILE)) return "";
-  return readFileSync(COOKIE_FILE, "utf8")
-    .split(/\r?\n/)
-    .filter((line) => line && !line.startsWith("#"))
-    .map((line) => line.split("\t"))
-    .filter((cols) => cols.length >= 7);
-}
-
-function cookieNames() {
-  return cookieRows().map((cols) => cols[5]);
-}
-
-function cookieHeader() {
-  return cookieRows()
-    .map((cols) => `${cols[5]}=${cols[6]}`)
-    .join("; ");
-}
-
 function mask(value) {
   return String(value || "")
     .replace(/(set-cookie:\s*[^=;\s]+)=([^;\r\n]+)/gi, "$1=<hidden>")
@@ -161,24 +74,112 @@ function mask(value) {
     .replace(/(token|secret|session|auth|password)=([^;&\s]+)/gi, "$1=<hidden>");
 }
 
-function showHttpDebug(label, headersFile, responseFile) {
-  const headers = existsSync(headersFile) ? readFileSync(headersFile, "utf8").split(/\r?\n/).filter(Boolean).slice(0, 20).join("\n") : "";
-  const body = existsSync(responseFile) ? readFileSync(responseFile, "utf8").slice(0, 500) : "";
-  log(`[${label}] response_headers:\n${mask(headers) || "(none)"}`);
-  log(`[${label}] response_body_sample=${mask(body) || "(empty)"}`);
+function withTimeout(timeoutSeconds) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+  return { signal: controller.signal, cancel: () => clearTimeout(id) };
 }
 
-function curlUrl(item, timeout, useCookie) {
-  const header = useCookie ? cookieHeader() : "";
-  const cookie = header ? `-H "Cookie: ${header}"` : "";
-  const headersFile = resolve(tmpdir(), `keep-alive-${process.pid}-${item.service}.headers`);
-  const responseFile = resolve(tmpdir(), `keep-alive-${process.pid}-${item.service}.body`);
-  const cmd = `curl -k -sS ${cookie} -D "${headersFile}" -o "${responseFile}" -w "%{http_code}" --max-time ${timeout} "${item.url}"`;
-  if (DRY_RUN) return log(`[DRY RUN] ${cmd}`);
-  const code = sh(cmd) || "ERR";
-  log(`[url] ${item.service} ${item.url} ${code} cookie_names=${useCookie ? cookieNames().join(",") || "(none)" : "(disabled)"}`);
-  showHttpDebug(item.service, headersFile, responseFile);
-  if (code !== "200") process.exitCode = 1;
+function cookieNamesFromSetCookie(setCookies) {
+  return setCookies.map((c) => c.split("=")[0]).join(",") || "(none)";
+}
+
+async function login(timeoutSeconds) {
+  const url = authUrl();
+  const username = env.TINYAUTH_CI_USER;
+  const password = env.TINYAUTH_CI_PASSWORD;
+  log(`[auth] url=${url || "(missing)"} user=${username || "(missing)"} password=${password ? "<hidden>" : "(missing)"}`);
+  if (!url || !username || !password) {
+    log("[auth] skipped: missing TINYAUTH_APPURL / TINYAUTH_CI_USER / TINYAUTH_CI_PASSWORD");
+    return { ok: false, reason: "config" };
+  }
+  const endpoint = `${url.replace(/\/$/, "")}/api/user/login`;
+  if (DRY_RUN) { log(`[DRY RUN] POST ${endpoint}`); return { ok: true, reason: "dry-run" }; }
+
+  const { signal, cancel } = withTimeout(timeoutSeconds);
+  let res;
+  try {
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+      signal,
+    });
+  } catch (e) {
+    // fetch() rejects for DNS failure, connection refused, TLS errors, or our
+    // own AbortController timeout — none of these ever produced an HTTP
+    // response, so this is "mạng chưa thông", never a credentials problem.
+    log(`[auth] network error reaching ${url}: ${e.name}: ${e.message}`);
+    return { ok: false, reason: "network", error: e.message };
+  } finally {
+    cancel();
+  }
+
+  const setCookies = typeof res.headers.getSetCookie === "function"
+    ? res.headers.getSetCookie()
+    : (res.headers.get("set-cookie") ? [res.headers.get("set-cookie")] : []);
+  const body = await res.text().catch(() => "");
+
+  log(`[auth] ${endpoint} -> HTTP ${res.status}`);
+  log(`[auth] response_body_sample=${mask(body.slice(0, 500)) || "(empty)"}`);
+  log(`[auth] set-cookie names=${cookieNamesFromSetCookie(setCookies)}`);
+
+  if (res.status === 401 || res.status === 403 || res.status === 422) {
+    return { ok: false, reason: "credentials", httpCode: res.status };
+  }
+  if (!(res.status >= 200 && res.status < 400)) {
+    return { ok: false, reason: "unexpected", httpCode: res.status };
+  }
+  if (setCookies.length === 0) {
+    // Login endpoint said success but never actually gave us a session cookie.
+    log("[auth] login returned success but no Set-Cookie header — treating as failed");
+    return { ok: false, reason: "no-cookie" };
+  }
+
+  sessionCookie = setCookies.map((c) => c.split(";")[0]).join("; ");
+  return { ok: true, reason: "ok" };
+}
+
+async function verifyCookie(urls, timeoutSeconds) {
+  const probe = urls[0];
+  if (!probe) return true;
+  const { signal, cancel } = withTimeout(timeoutSeconds);
+  let res;
+  try {
+    res = await fetch(probe.url, { headers: sessionCookie ? { Cookie: sessionCookie } : {}, signal });
+  } catch (e) {
+    log(`[auth] cookie check network error via ${probe.url}: ${e.name}: ${e.message}`);
+    return false;
+  } finally {
+    cancel();
+  }
+  log(`[auth] cookie check via ${probe.url} -> HTTP ${res.status}`);
+  if (res.status === 401 || res.status === 403) {
+    log("[auth] login succeeded but cookie doesn't authorize requests — check that TINYAUTH_APPURL shares a parent domain with the app URLs");
+    return false;
+  }
+  return true;
+}
+
+async function checkUrl(item, timeoutSeconds, useCookie) {
+  if (DRY_RUN) { log(`[DRY RUN] GET ${item.url}`); return; }
+  const { signal, cancel } = withTimeout(timeoutSeconds);
+  let res;
+  try {
+    res = await fetch(item.url, { headers: useCookie && sessionCookie ? { Cookie: sessionCookie } : {}, signal });
+  } catch (e) {
+    // Same distinction here: a thrown error means the request never completed
+    // (network/DNS/timeout), not that the service responded with an error.
+    log(`[url] ${item.service} ${item.url} ERR network: ${e.name}: ${e.message}`);
+    process.exitCode = 1;
+    return;
+  } finally {
+    cancel();
+  }
+  const body = await res.text().catch(() => "");
+  log(`[url] ${item.service} ${item.url} ${res.status} cookie=${useCookie ? (sessionCookie ? "sent" : "(none)") : "(disabled)"}`);
+  log(`[${item.service}] response_body_sample=${mask(body.slice(0, 500)) || "(empty)"}`);
+  if (res.status !== 200) process.exitCode = 1;
 }
 
 function runningContainers() {
@@ -211,12 +212,10 @@ if (!detectDocker().available) {
 }
 
 log(`Keeping stack alive for ${keepSeconds}s, heartbeat every ${intervalSeconds}s. URL: ${publicUrl}`);
-const loginResult = login(config.curl_timeout_seconds);
+const loginResult = await login(config.curl_timeout_seconds);
 if (!loginResult.ok) log(`[auth] not authenticated (reason: ${loginResult.reason}) — service checks will run without a cookie and may show 401s`);
 const initialUrls = serviceUrls(config);
-const hasCookie = loginResult.ok && Boolean(cookieHeader());
-if (hasCookie) verifyCookie(initialUrls, config.curl_timeout_seconds);
-const loggedIn = hasCookie;
+const loggedIn = loginResult.ok && Boolean(sessionCookie) && await verifyCookie(initialUrls, config.curl_timeout_seconds);
 
 let elapsed = 0;
 let since = new Date().toISOString();
@@ -227,7 +226,7 @@ while (elapsed < keepSeconds) {
   log(`[heartbeat] ${new Date().toISOString()} ${elapsed}/${keepSeconds}s`);
   const ps = sh(dockerCmd("compose ps"));
   if (ps) log(ps);
-  for (const item of serviceUrls(config)) curlUrl(item, config.curl_timeout_seconds, loggedIn);
+  for (const item of serviceUrls(config)) await checkUrl(item, config.curl_timeout_seconds, loggedIn);
   showLogs(since);
   since = new Date().toISOString();
   if (DRY_RUN) break;
