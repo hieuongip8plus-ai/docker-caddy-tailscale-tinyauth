@@ -2,6 +2,7 @@
 // Periodically push local rclone-managed files/folders to remotes.
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { redactSecrets } from "../../scripts/lib/redact-utils.mjs";
 import { configFile, ensureLocal, entries, loadConfig, loadEnv, localContainerPath, mapLimit, paths, selectedTags, writeConfigs } from "./lib.mjs";
 
 const args = process.argv.slice(2);
@@ -19,10 +20,6 @@ function runRclone(argv) {
     proc.on("error", (err) => res({ code: 1, stdout, stderr: `${stderr}\n${err.message}` }));
     proc.on("close", (code) => res({ code: code ?? 1, stdout, stderr }));
   });
-}
-
-function redact(value) {
-  return value.replace(/([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASS|AUTH|KEY|COOKIE|CREDENTIAL|CLIENT)[A-Z0-9_]*=)[^\s]+/gi, "$1[REDACTED]");
 }
 
 async function syncOne(item, config, p) {
@@ -50,7 +47,7 @@ async function syncOne(item, config, p) {
     return;
   }
   console.error(`Rclone sync failed for ${item.index}:${item.name}.`);
-  console.error(redact(`${stdout}\n${stderr}`.trim()));
+  console.error(redactSecrets(`${stdout}\n${stderr}`.trim()));
 }
 
 async function main() {

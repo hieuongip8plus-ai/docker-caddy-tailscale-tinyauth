@@ -24,8 +24,7 @@ jobs:
     name: Compose up + external access
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    if: >-
-      contains(fromJSON('["hoahien7281/docker-caddy-tailscale-tinyauth","o861cloudflare/dockerstack-s3proxy-2","hoaihoa981/dockerstack-s3proxy"]'), github.repository)
+    if: vars.ENABLE_SMOKE != 'false'
 
     steps:
       # ── Cache ─────────────────────────────────────────────────────

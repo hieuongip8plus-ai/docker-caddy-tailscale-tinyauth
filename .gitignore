@@ -7,6 +7,8 @@ ci-data/
 .DS_Store
 tailscale-state/
 **/tailscale-state/
+tailscale/serve.json
+tailscale/acl.hujson
 
 # ── Node.js ──────────────────────────────────────────
 node_modules/

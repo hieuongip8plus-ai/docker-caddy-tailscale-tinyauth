@@ -152,7 +152,7 @@ Public apps that should not go through Tinyauth: see [`docs/deploys/public-apps.
 
 | Variable | Purpose |
 |----------|---------|
-| `DOMAIN` | Base domain for default hostnames |
+| `DOMAIN` | Base domain for default hostnames; `localhost` fallback is only for local tests |
 | `CF_TUNNEL_TOKEN` | Cloudflare named tunnel token |
 | `TINYAUTH_APPURL` | Public login URL (https) |
 | `TINYAUTH_HOST` | Caddy site label (usually `http://auth.…`) |

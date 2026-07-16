@@ -2,6 +2,7 @@
 // Pull rclone remotes before app containers start.
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { redactSecrets } from "../../scripts/lib/redact-utils.mjs";
 import { detectDocker } from "../../scripts/runners/_docker.mjs";
 import { ROOT, configFile, containerName, ensureLocal, entries, loadConfig, loadEnv, localContainerPath, mapLimit, paths, selectedTags, writeConfigs } from "./lib.mjs";
 
@@ -25,10 +26,6 @@ function run(cmd) {
     proc.on("error", (err) => res({ code: 1, stdout, stderr: `${stderr}\n${err.message}` }));
     proc.on("close", (code) => res({ code: code ?? 1, stdout, stderr }));
   });
-}
-
-function redact(value) {
-  return value.replace(/([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASS|AUTH|KEY|COOKIE|CREDENTIAL|CLIENT)[A-Z0-9_]*=)[^\s]+/gi, "$1[REDACTED]");
 }
 
 function isMissingRemote(value) {
@@ -81,7 +78,7 @@ async function main() {
       return { name: item.name, ok: true };
     }
     console.error(`Rclone pull failed for ${item.index}:${item.name}.`);
-    console.error(redact(output.trim()));
+    console.error(redactSecrets(output.trim()));
     return { name: item.name, ok: false, code };
   });
 

@@ -8,6 +8,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "jsonc-parser";
 import { parseEnv } from "../../scripts/lib/env-utils.mjs";
+import { redactSecrets } from "../../scripts/lib/redact-utils.mjs";
 import { detectDocker } from "../../scripts/runners/_docker.mjs";
 
 const args = process.argv.slice(2);
@@ -48,14 +49,6 @@ function shQuote(value) {
 
 function isMissingRemote(output) {
   return /no matching backup|no such key|not found|does not exist|replica.*not.*found|NoSuchKey|404/i.test(output);
-}
-
-function redactSecrets(value) {
-  return value
-    .replace(/(access-key-id:\s*).+/gi, "$1[REDACTED]")
-    .replace(/(secret-access-key:\s*).+/gi, "$1[REDACTED]")
-    .replace(/(AWS_ACCESS_KEY_ID=)[^\s]+/gi, "$1[REDACTED]")
-    .replace(/(AWS_SECRET_ACCESS_KEY=)[^\s]+/gi, "$1[REDACTED]");
 }
 
 // Run a shell command async, capture stdout/stderr, never throw — caller inspects .code.

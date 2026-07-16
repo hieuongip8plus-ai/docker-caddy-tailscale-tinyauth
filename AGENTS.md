@@ -407,7 +407,8 @@ Security rule: CI artifacts and AI-analysis prompts must never contain raw secre
 6. Add Caddy labels if publicly routed; add `caddy.import: tinyauth_forwarder *` if auth is required.
 7. Register in root `docker-compose.yml` `include`.
 8. Update root `.env.example` (minimal keys + `COMPOSE_PROFILES` notes), `.env.ci`, README, and this file.
-9. Keep CI able to prove external reachability (whoami or equivalent).
+9. Update `scripts/runners/cache-config.jsonc` and `scripts/runners/ai-agents/opencode-analyze-config.jsonc` if the service adds compose files, Dockerfiles, or logs/code that CI should inspect.
+10. Keep CI able to prove external reachability (whoami or equivalent).
 
 ## What not to do
 

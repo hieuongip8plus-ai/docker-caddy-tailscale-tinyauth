@@ -8,6 +8,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "jsonc-parser";
 import { envGet, envKeys } from "../../lib/env-utils.mjs";
+import { redactSecrets } from "../../lib/redact-utils.mjs";
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes("--dry-run");
@@ -64,12 +65,6 @@ function readMaybe(path, limit = 12000) {
   const value = readFileSync(path, "utf8");
   const excerpt = value.length > limit ? `${value.slice(0, limit)}\n\n[truncated ${value.length - limit} chars]` : value;
   return redactSecrets(excerpt);
-}
-
-function redactSecrets(value) {
-  return value
-    .replace(/^(\s*-?\s*["']?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASS|AUTH|KEY|COOKIE|CREDENTIAL|ACCOUNT_ID|CLIENT_ID|CLIENT_SECRET|USERS)[A-Z0-9_]*["']?\s*[:=]\s*).+$/gmi, "$1[REDACTED]")
-    .replace(/("?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASS|AUTH|KEY|COOKIE|CREDENTIAL|ACCOUNT_ID|CLIENT_ID|CLIENT_SECRET|USERS)[A-Z0-9_]*"?=)[^",\]\s]+/gi, "$1[REDACTED]");
 }
 
 function listFiles(dir) {

@@ -185,7 +185,7 @@ function showStep(label, res) {
 
 // ── Hostnames config ─────────────────────────────────────────────
 function loadHostnames(domain) {
-  let hostnames = ["auth", "files", "ttyd"];
+  let hostnames = ["auth", "files", "ttyd", "webssh", "whoami", "dozzle", "logs"];
   let serviceUrl = "http://caddy:80";
   let catchAll = "http_status:404";
   if (existsSync(HOSTNAMES_FILE)) {
