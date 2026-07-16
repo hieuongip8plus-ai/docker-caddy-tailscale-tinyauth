@@ -20,6 +20,14 @@ services:
         required: false
     # Optional WHOAMI_NAME / PORT etc.: set only in root .env (env_file).
     # Do not inject empty strings via environment: — omit key when unused.
+    #
+    # NODE ID ECHO (Phần 1 #3): whoami echo "Name: <node-id>" trong body để CI
+    # đối chiếu leader đang chạy. Chỉ set khi có giá trị (tránh inject rỗng):
+    #   WHOAMI_NAME ưu tiên; nếu trống, dùng ORCH_NODE_ID (node id của runner).
+    # Compose bỏ qua biến rỗng vì có :- fallback lồng nhau về chính nó → nếu
+    # cả hai trống, WHOAMI_NAME sẽ không được set (image dùng hostname mặc định).
+    environment:
+      WHOAMI_NAME: ${WHOAMI_NAME:-${ORCH_NODE_ID:-whoami}}
     networks:
       - proxy
     healthcheck:

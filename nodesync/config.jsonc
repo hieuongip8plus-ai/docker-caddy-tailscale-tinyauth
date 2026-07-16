@@ -1,0 +1,49 @@
+// nodesync/config.jsonc
+// Cấu hình dịch vụ nodesync — đồng bộ dữ liệu giữa các node qua SSH (Tailscale
+// → Cloudflare → Hybrid, có fallback), tạo multi-user, treo request khi sync.
+//
+// TẤT CẢ giá trị ở đây có thể override bằng env (xem .env.example). File này là
+// "single source" cho giá trị mặc định — KHÔNG hardcode trong code (theo
+// convention repo: config → .jsonc sibling).
+{
+  // ── Kênh truyền (channel) & thứ tự fallback ────────────────────────────
+  // Sync sẽ thử lần lượt theo danh sách này, kênh nào KHÔNG enable / lỗi thì
+  // fallback sang kênh kế tiếp. Enable từng kênh bằng env:
+  //   SSH_CHANNEL_TAILSCALE_ENABLE / _CLOUDFLARE_ENABLE / _HYBRID_ENABLE
+  "channel_priority": ["tailscale", "cloudflare", "hybrid"],
+
+  // ── Đường dẫn dữ liệu cần đồng bộ (trong workspace mount) ───────────────
+  // Tương đối so với thư mục workspace (SSH_WORKSPACE, mặc định /workspace).
+  // node02 sẽ đồng bộ các path này TỪ node01 về khi có khác biệt.
+  "sync_paths": ["ci-data", "ci-runtime"],
+
+  // rsync options mặc định (an toàn, giữ quyền + thời gian + checksum để so).
+  "rsync_options": ["-az", "--delete", "--checksum", "--stats", "--human-readable"],
+
+  // ── Treo request khi đang sync (YÊU CẦU) ───────────────────────────────
+  // Mặc định trả 503 + Retry-After (đơn giản, chắc chắn). Client/node02 retry
+  // sau retry_after_seconds. Đặt "mode":"hold" để (tương lai) giữ kết nối.
+  "hold": {
+    "mode": "retry-after",       // "retry-after" | "hold"
+    "retry_after_seconds": 15,
+    // File cờ để Caddy biết đang treo (mount chung workspace). Khi tồn tại →
+    // Caddy trả 503. sync.mjs tạo/xoá file này.
+    "flag_file": "ci-runtime/nodesync/hold.flag"
+  },
+
+  // ── SSH server (sshd trong container nodesync) ─────────────────────────
+  "sshd": {
+    "port": 22,
+    // Cho phép mọi lệnh: user được cấp sudo NOPASSWD (phân quyền cao nhất).
+    "allow_all_commands": true,
+    // Cho phép đăng nhập bằng password (ngoài public key). Test/CI thuận tiện.
+    "password_authentication": true,
+    // Cho root login (khi cần quyền cao nhất chạy lệnh trong/ngoài docker).
+    "permit_root_login": true
+  },
+
+  // ── Timeout / retry ────────────────────────────────────────────────────
+  "ssh_connect_timeout_seconds": 10,
+  "sync_timeout_seconds": 600,
+  "diff_timeout_seconds": 120
+}

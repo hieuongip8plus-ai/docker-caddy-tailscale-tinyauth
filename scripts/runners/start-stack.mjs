@@ -65,6 +65,13 @@ function hasRcloneConfig(envFile) {
   return Object.keys(env).some((key) => /^RCLONE_\d+_NAME$/.test(key));
 }
 
+// nodesync bật khi SSH_ENABLE=1 (đồng bộ dữ liệu giữa node qua SSH).
+function hasNodesyncConfig(envFile) {
+  const env = { ...parseEnv(envFile), ...process.env };
+  const v = String(env.SSH_ENABLE ?? "0").toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 function firstIndexedName(envFile, prefix, key) {
   const env = { ...parseEnv(envFile), ...process.env };
   const indexes = Object.keys(env).map((name) => name.match(new RegExp(`^${prefix}_(\\d+)_${key}$`))?.[1]).filter(Boolean).sort((a, b) => Number(a) - Number(b));
@@ -97,6 +104,10 @@ if (hasLitestreamConfig(envFile)) {
 if (hasRcloneConfig(envFile)) {
   ensureProfile("rclone", envFile);
   process.env.RCLONE_CONTAINER_NAME = firstIndexedName(envFile, "RCLONE", "NAME");
+}
+if (hasNodesyncConfig(envFile)) {
+  ensureProfile("nodesync", envFile);
+  log("Ensuring nodesync profile is enabled (SSH_ENABLE=1)");
 }
 process.env.DOCKER_VOLUME_RUNTIME_ABS = resolveVolumeRoot(envGet(envFile, "DOCKER_VOLUME_RUNTIME"), "ci-runtime");
 process.env.DOCKER_VOLUME_DATA_ABS = resolveVolumeRoot(envGet(envFile, "DOCKER_VOLUME_DATA"), "ci-data");

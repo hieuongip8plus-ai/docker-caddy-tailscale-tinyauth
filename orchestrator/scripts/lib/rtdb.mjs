@@ -64,6 +64,7 @@ export function connectRtdb() {
     nodes: `${base}/nodes`,
     node: (id) => `${base}/nodes/${id}`,
     handoff: `${base}/handoff`,
+    handoffLog: `${base}/handoff/log`, // nhật ký chuyển giao (timeline append)
     events: `${base}/events`,
   };
 
@@ -88,5 +89,30 @@ export async function pushEvent(type, data = {}) {
     });
   } catch (e) {
     error(`pushEvent(${type}) failed: ${e.message}`);
+  }
+}
+
+// Ghi 1 dòng NHẬT KÝ CHUYỂN GIAO vào /handoff/log (timeline, append theo push).
+// Phục vụ yêu cầu Phần 1 #2: "ghi nhận nhật ký chuyển giao giữa 2 runner vào
+// rtdb để xem log thực thi có đúng không".
+//
+//   phase   : mã pha (vd "begin", "pipeline_start", "hook", "release", "complete")
+//   messageVi : diễn giải tiếng Việt ngắn gọn bước này
+//   data    : context thêm (from, to, term, hook, ok...)
+export async function pushHandoffLog(phase, messageVi, data = {}) {
+  try {
+    const { db, paths } = connectRtdb();
+    const { ServerValue } = await import("firebase-admin/database");
+    const entry = {
+      phase,
+      messageVi,
+      at: ServerValue.TIMESTAMP,
+      nodeId: process.env.ORCH_NODE_ID || null,
+      ...data,
+    };
+    await db.ref(paths.handoffLog).push(entry);
+    log(`Handoff log ← [${phase}] ${messageVi}`);
+  } catch (e) {
+    error(`pushHandoffLog(${phase}) failed: ${e.message}`);
   }
 }

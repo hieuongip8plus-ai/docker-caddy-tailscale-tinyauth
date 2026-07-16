@@ -69,3 +69,4 @@ include:
   - path: ./cloudflare/cloudflare.yml
   - path: ./tailscale/tailscale.yml
   - path: ./orchestrator/orchestrator.yml
+  - path: ./nodesync/nodesync.yml

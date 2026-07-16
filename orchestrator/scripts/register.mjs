@@ -11,7 +11,8 @@
 // Có thể gọi standalone (node register.mjs) hoặc import startRegistration().
 
 import { connectRtdb, ServerValue, pushEvent } from "./lib/rtdb.mjs";
-import { getNodeIdentity } from "./lib/node-identity.mjs";
+import { getNodeIdentityWithTailscale } from "./lib/node-identity.mjs";
+import { getTailscaleInfo } from "./lib/tailscale-info.mjs";
 import { log, error } from "./lib/log.mjs";
 
 const STATES = ["booting", "ready", "serving", "draining", "stopped"];
@@ -23,7 +24,7 @@ function intervalMs() {
 
 export async function startRegistration({ initialState = "booting" } = {}) {
   const { db, paths } = connectRtdb();
-  const identity = getNodeIdentity();
+  const identity = getNodeIdentityWithTailscale();
   const nodeRef = db.ref(paths.node(identity.nodeId));
 
   const base = {
@@ -41,7 +42,15 @@ export async function startRegistration({ initialState = "booting" } = {}) {
     stoppedAt: ServerValue.TIMESTAMP,
   });
   await pushEvent("node.registered", { nodeId: identity.nodeId, state: base.state });
-  log(`Registered node ${identity.nodeId} state=${base.state} host=${identity.host}`);
+  log(
+    `Registered node ${identity.nodeId} state=${base.state} host=${identity.host} ` +
+      `ts=${identity.tailscale?.available ? identity.tailscale.ip || "up" : "n/a"} ` +
+      `user=${identity.runtime?.systemUser}(uid=${identity.runtime?.uid}) cwd=${identity.runtime?.cwd}`,
+  );
+  if (!identity.tailscale?.available && identity.tailscale?.reason) {
+    // Debug rõ ràng khi KHÔNG lấy được tailnet (thiếu môi trường).
+    log(`Tailscale info không sẵn có: ${identity.tailscale.reason}`);
+  }
 
   const timer = setInterval(() => {
     nodeRef
@@ -64,6 +73,23 @@ export async function startRegistration({ initialState = "booting" } = {}) {
       process.env.ORCH_PUBLIC_URL = url;
       await nodeRef.update({ publicUrl: url, updatedAt: ServerValue.TIMESTAMP });
       log(`Node ${identity.nodeId} publicUrl set`);
+    },
+    // Cập nhật lại thông tin Tailscale (tailnet IP thường xuất hiện sau vài giây
+    // khi node vừa join xong). Gọi lại sau khi stack ready để có ip/hostname đúng.
+    async refreshTailscale() {
+      try {
+        const ts = getTailscaleInfo();
+        await nodeRef.update({ tailscale: ts, updatedAt: ServerValue.TIMESTAMP });
+        if (ts.available) {
+          log(`Node ${identity.nodeId} tailscale refreshed: ip=${ts.ip} host=${ts.hostname} ver=${ts.version} os=${ts.os}`);
+        } else {
+          log(`Node ${identity.nodeId} tailscale refresh: chưa sẵn có (${ts.reason})`);
+        }
+        return ts;
+      } catch (e) {
+        error(`refreshTailscale failed: ${e.message}`);
+        return { available: false, reason: e.message };
+      }
     },
     stopHeartbeat() {
       clearInterval(timer);

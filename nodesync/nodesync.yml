@@ -1,0 +1,56 @@
+# =============================================================================
+# nodesync/nodesync.yml — SSH sync sidecar (đồng bộ dữ liệu giữa các node)
+# =============================================================================
+#
+# Mục đích trong dự án:
+#   Cho phép các node (runner CI) CHÉP FILE + THỰC THI LỆNH cho nhau qua SSH,
+#   để đồng bộ dữ liệu khi chuyển ca (node02 pull remote → diff node01 → sync).
+#   Kênh: Tailscale → Cloudflare → Hybrid (cấu hình + fallback).
+#
+# "Toàn quyền": mount FULL workspace repo (rw) + docker.sock (chạy lệnh trong/
+#   ngoài docker), chạy root (user=0) để có quyền cao nhất khi cần.
+#
+# Bật bằng: SSH_ENABLE=1 (entrypoint idle nếu =0) + profile nodesync/full.
+#
+# Env — thứ tự ưu tiên: ../.env → ./.env → environment (cao nhất).
+# Catalog: nodesync/.env.example
+#
+# Profiles: nodesync | full
+# =============================================================================
+
+services:
+  nodesync:
+    build:
+      context: ..
+      dockerfile: nodesync/Dockerfile
+    image: proxy-stack-nodesync:local
+    container_name: nodesync
+    restart: unless-stopped
+    # Chạy root để tạo user / chạy mọi lệnh (kể cả trong docker qua socket).
+    user: "0:0"
+    stop_grace_period: 20s
+    env_file:
+      - path: ../.env
+        required: false
+      - path: .env
+        required: false
+    environment:
+      # Thư mục workspace mount (chứa dữ liệu cần sync + file cờ hold).
+      SSH_WORKSPACE: /workspace
+    volumes:
+      # Full workspace repo (đọc/GHI — cần ghi để rsync dữ liệu về + tạo cờ hold).
+      - ..:/workspace:rw
+      # Điều khiển docker (chạy lệnh trong/ngoài docker).
+      - /var/run/docker.sock:/var/run/docker.sock
+      # State ssh host keys (giữ qua restart).
+      - ${DOCKER_VOLUME_RUNTIME_ABS:-../ci-runtime}/nodesync/ssh:/etc/ssh
+    working_dir: /app
+    # Mở port SSH ra host (tuỳ chọn) — dùng khi test/kết nối trực tiếp.
+    # Named tunnel/tailnet thường KHÔNG cần publish; bật khi cần host access.
+    ports:
+      - "${SSH_HOST_PORT:-2222}:22"
+    networks:
+      - proxy
+    profiles:
+      - nodesync
+      - full

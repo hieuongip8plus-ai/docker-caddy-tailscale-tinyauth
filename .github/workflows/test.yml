@@ -84,6 +84,17 @@ jobs:
           cache-from: type=gha,scope=orchestrator
           cache-to: type=gha,mode=max,scope=orchestrator
 
+      - name: Build nodesync image
+        if: steps.docker-image-cache.outputs.cache-hit != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./nodesync/Dockerfile
+          tags: proxy-stack-nodesync:local
+          load: true
+          cache-from: type=gha,scope=nodesync
+          cache-to: type=gha,mode=max,scope=nodesync
+
       # ── Environment ───────────────────────────────────────────────
       - name: Setup environment
         env:
@@ -106,6 +117,17 @@ jobs:
         env:
           TEST_TIMEOUT: "180"
         run: node scripts/wait-and-test.mjs
+
+      # ── Verify leader ↔ whoami (orchestration) ────────────────────
+      # Sau khi node lên leader: curl whoami.{DOMAIN} mỗi 5s, đối chiếu
+      # "Name:" (= node id) có trùng leader đang chạy trên RTDB không.
+      # Chỉ chạy khi bật orchestration (CONSUL_ENABLE=1).
+      - name: Verify leader matches whoami
+        if: always()
+        env:
+          VERIFY_LEADER_TIMEOUT: "120"
+          VERIFY_LEADER_INTERVAL: "5"
+        run: node scripts/runners/verify-leader-whoami.mjs
 
       - name: Show public URL
         if: always()

@@ -14,7 +14,7 @@
 //
 // Toggle bằng CONSUL_ENABLE (=1 để bật). Nếu tắt, sidecar chỉ log rồi ngủ.
 
-import { connectRtdb, pushEvent } from "./lib/rtdb.mjs";
+import { connectRtdb, pushEvent, pushHandoffLog } from "./lib/rtdb.mjs";
 import { getNodeIdentity, heartbeatTtlMs } from "./lib/node-identity.mjs";
 import { startRegistration } from "./register.mjs";
 import { tryAcquire, renewLeadership, releaseLeadership, getLeader, describeLeader } from "./elect.mjs";
@@ -78,9 +78,40 @@ async function getElectionSnapshot() {
   };
 }
 
+// Diễn giải tiếng Việt cho từng label election-snapshot (yêu cầu Phần 1 #1).
+// Format log: "Election snapshot: <label> (<diễn giải tiếng Việt>)".
+const SNAPSHOT_VI = {
+  "stack-ready":
+    "stack cục bộ đã sẵn sàng (cloudflared running), node vào vòng election",
+  "leader-acquired":
+    "node này VỪA GIÀNH được ghế leader, bắt đầu phục vụ traffic",
+  "standby-blocked":
+    "đang chờ — leader hiện tại còn sống, chưa tới lượt tiếp quản",
+  "standby-no-leader":
+    "chưa có leader nào; node đang thử giành ghế ở vòng kế tiếp",
+  "leader-lost":
+    "node này ĐÃ MẤT ghế leader (bị node khác tiếp quản/term đổi), quay về standby",
+  "handoff-begin":
+    "BẮT ĐẦU chuyển giao: đã có node kế nhiệm sẵn sàng, leader vào trạng thái draining",
+  "handoff-before-release":
+    "sắp NHẢ ghế cho node kế nhiệm sau khi chạy xong pipeline handoff",
+  "handoff-complete":
+    "HOÀN TẤT chuyển giao: đã nhả ghế, node kế nhiệm sẽ giành leader ở vòng poll kế tiếp",
+  "signal-before-release":
+    "nhận tín hiệu tắt (SIGTERM/SIGINT) khi đang là leader → chuẩn bị nhả ghế",
+  "signal-after-release":
+    "đã nhả ghế xong sau tín hiệu tắt, đánh dấu node stopped",
+  "signal-standby-stop":
+    "node standby nhận tín hiệu tắt → dừng, không cần nhả ghế",
+};
+
+function describeSnapshotVi(label) {
+  return SNAPSHOT_VI[label] || "trạng thái election (chưa có diễn giải riêng)";
+}
+
 async function logElectionSnapshot(label, extra = {}) {
   try {
-    log(`Election snapshot: ${label}`, { ...extra, ...(await getElectionSnapshot()) });
+    log(`Election snapshot: ${label} (${describeSnapshotVi(label)})`, { ...extra, ...(await getElectionSnapshot()) });
   } catch (e) {
     warn(`Election snapshot failed (${label}): ${e.message}`);
   }
@@ -109,6 +140,8 @@ async function main() {
     warn("stack not ready within timeout — continuing but will not claim leadership yet");
   } else {
     await reg.setState("ready", { publicUrl: process.env.ORCH_PUBLIC_URL || "" });
+    // Sau khi stack ready, tailnet IP thường đã có → cập nhật lại thông tin tailscale.
+    await reg.refreshTailscale();
     const leader = await getLeader();
     log(`Stack ready. Current RTDB leader: ${describeLeader(leader)}`);
     await logElectionSnapshot("stack-ready", { self: identity.nodeId });
@@ -201,6 +234,9 @@ async function main() {
       handoffDone = true;
       log(`Handoff triggered → successor=${successor.id} (overTime=${overTime})`);
       await logElectionSnapshot("handoff-begin", { self: identity.nodeId, successor: successor.id, successorNode: successor.node, term, overTime });
+      await pushHandoffLog("begin", `Bắt đầu chuyển giao từ ${identity.nodeId} sang ${successor.id} (quáGiờ=${overTime}, term=${term})`, {
+        from: identity.nodeId, to: successor.id, term, overTime,
+      });
       await reg.setState("draining");
       await pushEvent("handoff.begin", { successor: successor.id, term });
 
@@ -216,16 +252,23 @@ async function main() {
         });
       } catch (e) {
         error(`handoff pipeline error: ${e.message}`);
+        await pushHandoffLog("pipeline_error", `Pipeline handoff lỗi: ${e.message}`, { from: identity.nodeId, to: successor.id, term });
       }
 
       // Nhường ghế: node kế nhiệm sẽ tryAcquire() và thắng.
       log(`Releasing leadership for successor=${successor.id}. Current leader before release: ${describeLeader(await getLeader())}`);
       await logElectionSnapshot("handoff-before-release", { self: identity.nodeId, successor: successor.id, term });
+      await pushHandoffLog("release", `Nhả ghế leader để ${successor.id} tiếp quản (term hiện tại=${term})`, {
+        from: identity.nodeId, to: successor.id, term,
+      });
       await releaseLeadership({ nodeId: identity.nodeId });
       await reg.setState("stopped");
       isLeader = false;
       log(`Handoff complete. Released term=${term}; successor=${successor.id} should acquire on next poll.`);
       await logElectionSnapshot("handoff-complete", { self: identity.nodeId, successor: successor.id, term });
+      await pushHandoffLog("complete", `Hoàn tất chuyển giao: ${identity.nodeId} đã nhả ghế, ${successor.id} sẽ giành leader ở vòng poll kế tiếp`, {
+        from: identity.nodeId, to: successor.id, term,
+      });
       await pushEvent("handoff.complete", { successor: successor.id, term });
       // Sau khi nhường, container sidecar có thể tự thoát để job kết thúc gọn.
       if (process.env.ORCH_EXIT_AFTER_HANDOFF === "1") process.exit(0);

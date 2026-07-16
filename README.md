@@ -28,6 +28,7 @@ Tailnet  ──► Tailscale Serve ──► Caddy   (optional private access)
 | `cloudflare/cloudflare.yml` + `cloudflare/scripts/` | `cloudflared` tunnel (public edge) |
 | `tailscale/tailscale.yml` + `tailscale/scripts/` | Optional Tailscale node + Serve |
 | `orchestrator/orchestrator.yml` + `orchestrator/scripts/` | RTDB leader/handoff sidecar |
+| `nodesync/nodesync.yml` + `nodesync/scripts/` | SSH data-sync sidecar (Tailscale→Cloudflare→Hybrid) |
 | `scripts/` | **Stack-wide only** (`up.mjs`, `wait-and-test.mjs`) |
 | `docker-compose.yml` | Joins all service files |
 | `docker-compose.ci.yml` | Quick-tunnel overrides for CI |
@@ -61,8 +62,8 @@ COMPOSE_PROFILES=core,tailscale docker compose up -d
 | Profile | Services |
 |---------|----------|
 | `core` | caddy, tinyauth, whoami, cloudflare, orchestrator |
-| `full` | core + tailscale + dozzle + filebrowser + webssh |
-| `caddy` / `litestream` / `rclone` / `tinyauth` / `whoami` / `cloudflare` / `tailscale` / `dozzle` / `filebrowser` / `webssh` / `orchestrator` | từng service |
+| `full` | core + tailscale + dozzle + filebrowser + webssh + nodesync |
+| `caddy` / `litestream` / `rclone` / `tinyauth` / `whoami` / `cloudflare` / `tailscale` / `dozzle` / `filebrowser` / `webssh` / `orchestrator` / `nodesync` | từng service |
 
 Set in `.env`:
 
@@ -145,6 +146,7 @@ Root `.env.example` = minimal keys the compose files actually use.
 | [`tailscale/.env.example`](tailscale/.env.example) | all `TS_*` Docker params |
 | [`networks/.env.example`](networks/.env.example) | network knobs (mostly hard-coded) |
 | [`orchestrator/.env.example`](orchestrator/.env.example) | `ORCH_*` RTDB leader/handoff sidecar |
+| [`nodesync/.env.example`](nodesync/.env.example) | `SSH_*` / `NODESYNC_*` data-sync sidecar |
 
 Copy **only** keys you need from a catalog into root `.env` (with real values).  
 Do **not** copy blank lines like `TINYAUTH_SERVER_SOCKETPATH=` — empty optional env can prevent Tinyauth/Caddy from starting (same risk in prod and CI).

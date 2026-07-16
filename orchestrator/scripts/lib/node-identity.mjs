@@ -10,6 +10,8 @@
 
 import { hostname } from "node:os";
 import { execSync } from "node:child_process";
+import { getTailscaleInfo } from "./tailscale-info.mjs";
+import { getSshRuntimeIdentity } from "./ssh-identity.mjs";
 
 function safeHostname() {
   try {
@@ -103,5 +105,27 @@ export function getNodeIdentity() {
     domain: process.env.DOMAIN || "",
     profiles: process.env.COMPOSE_PROFILES || "",
     meta: collectMeta(),
+    // Thông tin runtime/nodesync (user hệ thống, cwd, kênh sync, ssh users…).
+    // Rẻ (không shell ra docker) nên luôn kèm.
+    runtime: getSshRuntimeIdentity(),
   };
+}
+
+/**
+ * Bản mở rộng của getNodeIdentity có kèm thông tin Tailscale (ip/hostname/
+ * version/os của tailnet). TÁCH RIÊNG vì việc lấy tailscale phải shell ra
+ * `docker compose exec tailscale ...` (tốn vài trăm ms và cần docker.sock).
+ *
+ * Dùng trong register.mjs (chạy trong container sidecar có docker.sock).
+ * Các script quan sát nhẹ (status.mjs) KHÔNG cần gọi bản này.
+ */
+export function getNodeIdentityWithTailscale() {
+  const identity = getNodeIdentity();
+  let tailscale;
+  try {
+    tailscale = getTailscaleInfo();
+  } catch (e) {
+    tailscale = { available: false, reason: `getTailscaleInfo threw: ${e.message}` };
+  }
+  return { ...identity, tailscale };
 }
