@@ -11,7 +11,8 @@
 //       So sánh 2 thư mục CỤC BỘ (dùng cho test 2-node khi cả 2 data dir cùng
 //       mount vào máy — KIỂM CHỨNG THẬT không cần ssh/docker).
 //   (B) --peer  (mặc định)
-//       So sánh workspace cục bộ với source qua ssh (dùng lib/ssh.mjs resolve).
+//       Chế độ peer chưa hiện thực trong CLI này (sync + xác thực nằm ở
+//       scripts/sync.mjs). Không trả PASS giả.
 //
 //   node scripts/verify-integrity.mjs --local ./ci-data-source ./ci-data-receiver
 //   node scripts/verify-integrity.mjs --local A B --json

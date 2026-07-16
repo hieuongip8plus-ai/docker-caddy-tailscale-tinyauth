@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "nodesync: đồng bộ dữ liệu giữa các node qua SSH (Tailscale→Cloudflare→Hybrid), multi-user SSH_<n>_*.",
+  "description": "nodesync: sidecar client/controller đồng bộ dữ liệu giữa các runner qua SSH (Tailscale→Cloudflare→Hybrid). SSH server bootstrap trên host, discovery qua RTDB.",
   "bin": {
     "nodesync": "scripts/entrypoint.mjs"
   },

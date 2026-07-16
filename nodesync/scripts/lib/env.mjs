@@ -1,16 +1,14 @@
 // nodesync/scripts/lib/env.mjs
 // Đọc cấu hình nodesync từ ENV + config.jsonc.
 //
-// QUY TẮC (theo yêu cầu + convention repo):
-//   - Multi-user: SSH_<n>_USER / SSH_<n>_PASS / SSH_<n>_PUBLIC_KEY /
-//     SSH_<n>_PRIVATE_KEY. Có thể tạo nhiều user theo index (1,2,3...).
-//   - Secret (PASS, PRIVATE_KEY) có thể ở dạng base64 (mask theo `base64 -w0`).
-//     Đặt SSH_<n>_PASS_B64=1 / SSH_<n>_PRIVATE_KEY_B64=1 để báo cần decode.
-//     (PUBLIC_KEY thường để nguyên; nếu base64 thì SSH_<n>_PUBLIC_KEY_B64=1.)
+// QUY TẮC (kiến trúc dynamic hiện hành — xem report 06/07):
+//   - Sidecar là client/controller: KHÔNG tạo user, KHÔNG chạy sshd. SSH server
+//     được bootstrap trên CI runner (scripts/runners/setup-nodesync-ssh.mjs),
+//     dùng 1 keypair Ed25519 chung, key-only (không password/không root).
+//     Keypair: SSH_1_PRIVATE_KEY / SSH_1_PUBLIC_KEY (có thể *_B64=1).
 //   - Kênh: SSH_CHANNEL_TAILSCALE_ENABLE / _CLOUDFLARE_ENABLE / _HYBRID_ENABLE.
 //   - KHÔNG parse .env bằng regex thô — env đã có sẵn trong process.env (Compose
-//     inject qua env_file). Chỉ match KEY theo pattern index (giống repo dùng
-//     LITESTREAM_<n>_SERVICE trong start-stack.mjs).
+//     inject qua env_file).
 
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -64,41 +62,6 @@ export function loadConfig() {
 // Thư mục workspace mount (chứa dữ liệu cần sync + file cờ hold).
 export function workspaceDir() {
   return process.env.SSH_WORKSPACE || process.env.ORCH_REPO_DIR || "/workspace";
-}
-
-// Nhặt danh sách user SSH_<n>_* (giải mã secret nếu cần).
-export function collectSshUsers(env = process.env) {
-  const idxs = new Set();
-  for (const k of Object.keys(env)) {
-    const m = k.match(/^SSH_(\d+)_USER$/);
-    if (m) idxs.add(Number(m[1]));
-  }
-  const users = [];
-  for (const idx of [...idxs].sort((a, b) => a - b)) {
-    const p = (suffix) => env[`SSH_${idx}_${suffix}`];
-    const user = p("USER");
-    if (!user) continue;
-    if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(user)) {
-      throw new Error(`SSH_${idx}_USER không hợp lệ: chỉ cho phép [a-z_][a-z0-9_-]{0,31}`);
-    }
-    const shell = p("SHELL") || "/bin/bash";
-    const uid = p("UID") || null;
-    if (!shell.startsWith("/") || shell.includes("..")) throw new Error(`SSH_${idx}_SHELL không hợp lệ`);
-    if (uid != null && !/^\d+$/.test(uid)) throw new Error(`SSH_${idx}_UID phải là số`);
-    users.push({
-      index: idx,
-      user,
-      password: maybeB64(p("PASS") ?? p("PASSWORD"), truthy(p("PASS_B64") ?? p("PASSWORD_B64"))),
-      publicKey: maybeB64(p("PUBLIC_KEY"), truthy(p("PUBLIC_KEY_B64"))),
-      privateKey: maybeB64(p("PRIVATE_KEY"), truthy(p("PRIVATE_KEY_B64"))),
-      // Quyền: mặc định privileged (sudo NOPASSWD, chạy mọi lệnh) theo yêu cầu.
-      privileged: truthy(p("PRIVILEGED"), "1"),
-      // Shell/uid đã validate ở trên.
-      shell,
-      uid,
-    });
-  }
-  return users;
 }
 
 // Kênh nào được bật + thứ tự ưu tiên fallback.

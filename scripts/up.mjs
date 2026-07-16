@@ -73,6 +73,7 @@ function getNodesyncConfig() {
     enabled: truthy(env.SSH_ENABLE),
     syncOnStart: String(env.NODESYNC_SYNC_PATHS || "").split(",").some(Boolean),
     tailscale: truthy(env.SSH_CHANNEL_TAILSCALE_ENABLE ?? "1"),
+    orchestratorEnabled: truthy(env.CONSUL_ENABLE),
   };
 }
 
@@ -176,9 +177,22 @@ await Promise.all([
   runPrefixed("rclone", `node rclone/scripts/pull.mjs${SILENT ? " --silent" : ""}`),
 ]);
 if (nodesync.enabled && nodesync.syncOnStart) {
-  const services = nodesync.tailscale ? "tailscale nodesync" : "nodesync";
-  run(compose(`up -d ${services}`));
+  // Discovery bắt buộc orchestrator (RTDB) để chọn predecessor. Không có nó thì
+  // sync.mjs sẽ throw "thiếu discovery manifest" → fail rõ ràng ngay từ đây.
+  if (!nodesync.orchestratorEnabled) {
+    throw new Error("NODESYNC_SYNC_PATHS có dữ liệu nhưng CONSUL_ENABLE!=1; RTDB discovery là bắt buộc cho nodesync sync.");
+  }
+  // 1) Bootstrap SSH server trên host runner (tạo/cài key, sshd, host key...).
+  run(`node scripts/runners/setup-nodesync-ssh.mjs${DRY_RUN ? " --dry-run" : ""}`);
+  // 2) Start transport + orchestrator + nodesync (orchestrator register lên RTDB).
+  const services = ["orchestrator", "nodesync"];
+  if (nodesync.tailscale) services.unshift("tailscale");
+  run(compose(`up -d ${services.join(" ")}`));
   await waitNodesync();
+  // 3) Chờ RTDB server timestamp ổn định rồi discover predecessor.
+  if (!DRY_RUN) await new Promise((done) => setTimeout(done, 3000));
+  run(compose(`exec -T orchestrator node scripts/discover-predecessor.mjs`));
+  // 4) Sync configured paths từ predecessor (đọc predecessor.json ở bước 3).
   run(compose(`exec -T nodesync node scripts/sync.mjs${SILENT ? " --silent" : ""}`));
   log("Nodesync pre-start hoàn tất.");
 }

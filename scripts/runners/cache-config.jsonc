@@ -1,5 +1,10 @@
 {
   // Compose files used to compute the runtime smoke-test Docker image cache key.
+  //
+  // QUAN TRỌNG: danh sách này phải KHỚP với thực tế file trong orchestrator/ và
+  // nodesync/ (mọi .mjs + Dockerfile + package*.json + config). Nếu thêm/xoá
+  // file trong 2 service, PHẢI cập nhật ở đây, nếu không cache key không đổi và
+  // CI có thể dùng image build cũ. verify-source-invariants.mjs sẽ chặn lệch.
   "compose_yamls": [
     "caddy/caddy.yml",
     "cloudflare/cloudflare.yml",
@@ -14,6 +19,8 @@
     "rclone/rclone.yml",
     "rclone/Dockerfile",
     "rclone/scripts/sync-loop.mjs",
+
+    // ── orchestrator (đồng bộ đầy đủ) ──
     "orchestrator/orchestrator.yml",
     "orchestrator/Dockerfile",
     "orchestrator/package.json",
@@ -22,27 +29,35 @@
     "orchestrator/scripts/main.mjs",
     "orchestrator/scripts/register.mjs",
     "orchestrator/scripts/elect.mjs",
+    "orchestrator/scripts/discover-predecessor.mjs",
+    "orchestrator/scripts/handoff-log.mjs",
+    "orchestrator/scripts/print-leader.mjs",
     "orchestrator/scripts/watch.mjs",
     "orchestrator/scripts/status.mjs",
     "orchestrator/scripts/lib/docker.mjs",
+    "orchestrator/scripts/lib/host-ssh-info.mjs",
+    "orchestrator/scripts/lib/leader-whoami-monitor.mjs",
     "orchestrator/scripts/lib/log.mjs",
     "orchestrator/scripts/lib/node-identity.mjs",
     "orchestrator/scripts/lib/rtdb.mjs",
+    "orchestrator/scripts/lib/ssh-identity.mjs",
+    "orchestrator/scripts/lib/tailscale-info.mjs",
     "orchestrator/scripts/hooks/index.mjs",
     "orchestrator/scripts/hooks/stop-cloudflared.mjs",
     "orchestrator/scripts/hooks/upload-data.mjs",
+
+    // ── nodesync (client/controller sidecar) ──
     "nodesync/nodesync.yml",
     "nodesync/Dockerfile",
     "nodesync/package.json",
     "nodesync/package-lock.json",
     "nodesync/config.jsonc",
     "nodesync/scripts/entrypoint.mjs",
-    "nodesync/scripts/setup-users.mjs",
     "nodesync/scripts/sync.mjs",
     "nodesync/scripts/verify-integrity.mjs",
     "nodesync/scripts/lib/env.mjs",
     "nodesync/scripts/lib/log.mjs",
-    "nodesync/scripts/lib/ssh.mjs",
+
     "docker-compose.ci.yml",
   ],
 }
