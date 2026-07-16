@@ -42,10 +42,13 @@ function sh(cmd) {
   }
 }
 
-// Discover services dynamically from running containers
-const running = sh(dockerCmd('ps --format "{{.Names}}"')).split("\n").filter(Boolean);
-const all = sh(dockerCmd('ps -a --format "{{.Names}}"')).split("\n").filter(Boolean);
-const services = all.length > 0 ? all : running;
+// Discover compose services from this project only.
+const PROJECT = process.env.COMPOSE_PROJECT_NAME || "proxy-stack";
+const projectFilter = `--filter "label=com.docker.compose.project=${PROJECT}"`;
+const serviceLabel = '{{.Label "com.docker.compose.service"}}';
+const running = sh(dockerCmd(`ps ${projectFilter} --format '${serviceLabel}'`)).split("\n").filter(Boolean);
+const all = sh(dockerCmd(`ps -a ${projectFilter} --format '${serviceLabel}'`)).split("\n").filter(Boolean);
+const services = [...new Set(all.length > 0 ? all : running)];
 
 mkdirSync(`${LOG_DIR}/services`, { recursive: true });
 mkdirSync(`${LOG_DIR}/inspect`, { recursive: true });
@@ -73,7 +76,7 @@ for (const svc of services) {
   const svcLog = run(dockerCmd(`compose logs --no-color --timestamps ${svc}`));
   writeFileSync(`${LOG_DIR}/services/${svc}.log`, redactSecrets(svcLog || "(no logs or service not in this run)\n"));
 
-  const cid = sh(dockerCmd(`ps -aq --filter "name=^${svc}$"`) + " | head -1");
+  const cid = sh(dockerCmd(`ps -aq ${projectFilter} --filter "label=com.docker.compose.service=${svc}"`)).split("\n")[0] || "";
   if (cid) {
     writeFileSync(`${LOG_DIR}/inspect/${svc}.json`, redactSecrets(run(dockerCmd(`inspect ${cid}`)) || "{}"));
     writeFileSync(`${LOG_DIR}/services/${svc}.docker-logs.log`, redactSecrets(run(dockerCmd(`logs --timestamps ${cid}`))));

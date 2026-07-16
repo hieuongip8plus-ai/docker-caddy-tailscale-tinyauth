@@ -12,6 +12,7 @@ import { appendFileSync, copyFileSync, existsSync, readFileSync, writeFileSync }
 import { execSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 import { envGet, envHasKey, envKeys } from "../lib/env-utils.mjs";
 
 const args = process.argv.slice(2);
@@ -44,8 +45,9 @@ function envAppend(line) {
 
 // 1. Write .env
 if (DRY_RUN) {
+  const dryEnv = ENV_FILE ? dotenv.parse(ENV_FILE) : {};
   log(`[DRY RUN] Would write .env from: ${ENV_FILE ? "secrets.ENV_FILE" : ".env.ci"}`);
-  log(`[DRY RUN] Mode: ${ENV_FILE && ENV_FILE.includes("CF_TUNNEL_TOKEN") ? "named" : "quick"}`);
+  log(`[DRY RUN] Mode: ${dryEnv.CF_TUNNEL_TOKEN ? "named" : "quick"}`);
 } else if (ENV_FILE) {
   writeFileSync(ENV, ENV_FILE + "\n");
   log("Wrote .env from secrets.ENV_FILE");

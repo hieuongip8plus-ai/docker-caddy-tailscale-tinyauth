@@ -54,11 +54,9 @@ async function hashBcrypt(pw) {
   try {
     const { default: bcryptjs } = await import("bcryptjs");
     return bcryptjs.hashSync(pw, 10);
-  } catch {}
-  try {
-    const { execSync } = await import("node:child_process");
-    return execSync(`openssl passwd -6 ${JSON.stringify(pw)}`).toString().trim();
-  } catch {}
+  } catch {
+    console.error("ERROR: bcryptjs is required for Tinyauth v5 bcrypt hashes. Run: npm install");
+  }
   return null;
 }
 
