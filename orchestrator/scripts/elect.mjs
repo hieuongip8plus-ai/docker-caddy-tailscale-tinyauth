@@ -9,7 +9,7 @@
 //   - Leader giữ ghế bằng renewLeadership() (đập heartbeat lên /leader).
 //   - Standby gọi tryAcquire() theo chu kỳ; khi leader cũ chết sẽ tiếp quản.
 
-import { connectRtdb, ServerValue } from "./lib/rtdb.mjs";
+import { connectRtdb } from "./lib/rtdb.mjs";
 import { heartbeatTtlMs } from "./lib/node-identity.mjs";
 import { log } from "./lib/log.mjs";
 
@@ -19,6 +19,12 @@ function now() {
 
 function valueOrNull(value) {
   return value === undefined || value === "" ? null : value;
+}
+
+export function describeLeader(leader, at = now()) {
+  if (!leader || !leader.nodeId) return "none";
+  const ageMs = at - (leader.heartbeat || 0);
+  return `node=${leader.nodeId} host=${leader.host || "(n/a)"} term=${leader.term || 0} heartbeatAgeMs=${ageMs}`;
 }
 
 // Thử giành quyền leader. Trả { acquired, term, leader }.
@@ -63,7 +69,13 @@ export async function tryAcquire({ nodeId, host, publicUrl }) {
   const snap = result.snapshot.val();
   const acquired = result.committed && snap && snap.nodeId === nodeId;
   if (acquired) log(`Acquired leadership: term=${snap.term} node=${nodeId}`);
-  return { acquired, term: snap?.term, leader: snap };
+  return {
+    acquired,
+    term: snap?.term,
+    leader: snap,
+    blockedBy: acquired ? null : snap,
+    ttlMs: ttl,
+  };
 }
 
 // Leader renew heartbeat trên /leader (kèm publicUrl mới nếu có).
@@ -72,12 +84,13 @@ export async function renewLeadership({ nodeId, publicUrl }) {
   const ref = db.ref(paths.leader);
   const snap = await ref.get();
   const current = snap.val();
-  if (!current || current.nodeId !== nodeId) return false;
+  if (!current || current.nodeId !== nodeId) return { held: false, leader: current };
+  const heartbeat = now();
   await ref.update({
-    heartbeat: now(),
+    heartbeat,
     publicUrl: valueOrNull(publicUrl || current.publicUrl),
   });
-  return true;
+  return { held: true, leader: { ...current, heartbeat } };
 }
 
 // Chủ động nhường ghế (dùng trong graceful handoff).

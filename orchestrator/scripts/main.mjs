@@ -14,10 +14,10 @@
 //
 // Toggle bằng CONSUL_ENABLE (=1 để bật). Nếu tắt, sidecar chỉ log rồi ngủ.
 
-import { connectRtdb, ServerValue, pushEvent } from "./lib/rtdb.mjs";
+import { connectRtdb, pushEvent } from "./lib/rtdb.mjs";
 import { getNodeIdentity, heartbeatTtlMs } from "./lib/node-identity.mjs";
 import { startRegistration } from "./register.mjs";
-import { tryAcquire, renewLeadership, releaseLeadership, getLeader } from "./elect.mjs";
+import { tryAcquire, renewLeadership, releaseLeadership, getLeader, describeLeader } from "./elect.mjs";
 import { runHandoffPipeline, loadConfig } from "./hooks/index.mjs";
 import { isRunning } from "./lib/docker.mjs";
 import { log, warn, error } from "./lib/log.mjs";
@@ -88,6 +88,8 @@ async function main() {
     warn("stack not ready within timeout — continuing but will not claim leadership yet");
   } else {
     await reg.setState("ready", { publicUrl: process.env.ORCH_PUBLIC_URL || "" });
+    const leader = await getLeader();
+    log(`Stack ready. Current RTDB leader: ${describeLeader(leader)}`);
   }
 
   const acquireInterval = num("ORCH_ACQUIRE_INTERVAL_SECONDS", config.acquire_interval_seconds || 5) * 1000;
@@ -105,8 +107,13 @@ async function main() {
   const onExit = async (sig) => {
     try {
       if (isLeader) {
-        warn(`signal ${sig}: leader stepping down`);
+        const leaderBeforeRelease = await getLeader();
+        warn(`Signal ${sig}: stepping down from leader. RTDB before release: ${describeLeader(leaderBeforeRelease)}`);
         await releaseLeadership({ nodeId: identity.nodeId });
+        await reg.setState("stopped");
+        warn(`Signal ${sig}: released leadership and marked node stopped.`);
+      } else {
+        warn(`Signal ${sig}: standby node stopping. No leadership release needed.`);
         await reg.setState("stopped");
       }
     } catch {}
@@ -120,7 +127,7 @@ async function main() {
     if (!isLeader) {
       // Standby: cố giành ghế (chỉ giành khi chưa có leader / leader chết).
       if (ready || isRunning(process.env.ORCH_READY_SERVICE || "cloudflared")) {
-        const { acquired, term: t } = await tryAcquire({
+        const { acquired, term: t, blockedBy, ttlMs } = await tryAcquire({
           nodeId: identity.nodeId,
           host: identity.host,
           publicUrl: process.env.ORCH_PUBLIC_URL || "",
@@ -133,6 +140,10 @@ async function main() {
           await reg.setState("serving");
           await pushEvent("leader.acquired", { term, nodeId: identity.nodeId });
           log(`Now LEADER (term=${term}). Serving traffic.`);
+        } else if (blockedBy?.nodeId) {
+          log(`Standby: leader still active (${describeLeader(blockedBy)} ttlMs=${ttlMs}). Waiting.`);
+        } else {
+          log("Standby: no leader acquired yet. Waiting.");
         }
       }
       await sleep(acquireInterval);
@@ -140,16 +151,17 @@ async function main() {
     }
 
     // Leader: renew ghế.
-    const held = await renewLeadership({
+    const { held, leader: currentLeader } = await renewLeadership({
       nodeId: identity.nodeId,
       publicUrl: process.env.ORCH_PUBLIC_URL || "",
     });
     if (!held) {
-      warn("lost leadership (term bumped by another node). Reverting to standby.");
+      warn(`Lost leadership. Current RTDB leader: ${describeLeader(currentLeader)}. Reverting to standby.`);
       isLeader = false;
       await reg.setState("ready");
       continue;
     }
+    log(`Renewed leadership: ${describeLeader(currentLeader)}`);
 
     // [YC③] Có node kế nhiệm mới ready → tiến hành handoff để chuyền traffic.
     const overTime = Date.now() - leaderSince > maxLeaderMs;
@@ -177,10 +189,11 @@ async function main() {
       }
 
       // Nhường ghế: node kế nhiệm sẽ tryAcquire() và thắng.
+      log(`Releasing leadership for successor=${successor.id}. Current leader before release: ${describeLeader(await getLeader())}`);
       await releaseLeadership({ nodeId: identity.nodeId });
       await reg.setState("stopped");
       isLeader = false;
-      log("Handoff complete. This node stepped down. Bye.");
+      log(`Handoff complete. Released term=${term}; successor=${successor.id} should acquire on next poll.`);
       await pushEvent("handoff.complete", { successor: successor.id, term });
       // Sau khi nhường, container sidecar có thể tự thoát để job kết thúc gọn.
       if (process.env.ORCH_EXIT_AFTER_HANDOFF === "1") process.exit(0);
