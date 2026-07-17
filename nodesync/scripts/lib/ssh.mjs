@@ -55,7 +55,7 @@ export function resolveTailscale(peer) {
       if (ip) {
         return {
           channel: "tailscale", host: ip, method: "status-json+socks5",
-          proxyCommand: "nc -x tailscale:1055 %h %p",
+          proxyCommand: "nc -x localhost:1055 %h %p",
           reason: null,
         };
       }

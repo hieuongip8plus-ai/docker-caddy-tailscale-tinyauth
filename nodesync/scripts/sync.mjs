@@ -126,7 +126,7 @@ const TS_WARMUP_DELAY_MS = Math.max(0, Number(process.env.SSH_TAILSCALE_WARMUP_D
 const TS_WARMUP_TIMEOUT_SEC = Math.max(1, Number(process.env.SSH_TAILSCALE_WARMUP_TIMEOUT_SECONDS || 3));
 async function warmupTailscaleEndpoint(host, port) {
   for (let attempt = 1; attempt <= TS_WARMUP_RETRIES; attempt++) {
-    const r = await exec("nc", ["-z", "-w", String(TS_WARMUP_TIMEOUT_SEC), "-x", "tailscale:1055", host, String(port)], {
+    const r = await exec("nc", ["-z", "-w", String(TS_WARMUP_TIMEOUT_SEC), "-x", "localhost:1055", host, String(port)], {
       timeout: (TS_WARMUP_TIMEOUT_SEC + 2) * 1000,
     });
     if (r.ok) {

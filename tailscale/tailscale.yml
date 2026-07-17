@@ -26,8 +26,9 @@ services:
       TS_STATE_DIR: ${TS_STATE_DIR:-/var/lib/tailscale}
       TS_USERSPACE: ${TS_USERSPACE:-true}
       # Userspace mode không tạo route tailnet cho container khác. Expose SOCKS5
-      # nội bộ để nodesync SSH qua tailnet (`nc -x tailscale:1055`).
-      TS_SOCKS5_SERVER: ${TS_SOCKS5_SERVER:-:1055}
+      # nội bộ để nodesync SSH qua tailnet (`nc -x localhost:1055`) khi
+      # nodesync dùng chung network namespace với service này.
+      TS_SOCKS5_SERVER: ${TS_SOCKS5_SERVER:-localhost:1055}
       # Serve (path khớp mount serve.json)
       TS_SERVE_CONFIG: ${TS_SERVE_CONFIG:-/config/serve.json}
       # Extra flags

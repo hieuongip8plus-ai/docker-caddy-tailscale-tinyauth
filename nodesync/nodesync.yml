@@ -1,5 +1,6 @@
 # nodesync client/controller sidecar. Không chạy sshd, Tailscale daemon hoặc
-# Cloudflare connector; dùng Tailscale SOCKS5 và cloudflared Access client local.
+# Cloudflare connector; dùng chung network namespace với tailscale để SOCKS5
+# localhost:1055 khớp tailscaled userspace mode.
 services:
   nodesync:
     build:
@@ -17,6 +18,9 @@ services:
     environment:
       SSH_WORKSPACE: /workspace
       SSH_RUNTIME_DIR: /runtime
+    depends_on:
+      tailscale:
+        condition: service_started
     volumes:
       - ..:/workspace:rw
       - ${DOCKER_VOLUME_RUNTIME_ABS:-../ci-runtime}/nodesync:/runtime:rw
@@ -26,6 +30,5 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
-    networks:
-      - proxy
+    network_mode: service:tailscale
     profiles: [nodesync, full]

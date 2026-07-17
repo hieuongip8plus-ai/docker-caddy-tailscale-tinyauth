@@ -31,9 +31,9 @@ test("Tailscale endpoints always use host-sshd Serve through userspace SOCKS5", 
   const list = endpoints(source).tailscale;
   assert.equal(list.length, 3);
   assert.deepEqual(list.map(({ host, port, proxy, transport, address }) => ({ host, port, proxy, transport, address })), [
-    { host: "runner.tailnet.ts.net", port: 2222, proxy: "nc -x tailscale:1055 %h %p", transport: "ts-serve", address: "magicdns" },
-    { host: "100.110.98.100", port: 2222, proxy: "nc -x tailscale:1055 %h %p", transport: "ts-serve", address: "tailnet-ip" },
-    { host: "fd7a:115c:a1e0::323b:6265", port: 2222, proxy: "nc -x tailscale:1055 %h %p", transport: "ts-serve", address: "tailnet-ip" },
+    { host: "runner.tailnet.ts.net", port: 2222, proxy: "nc -x localhost:1055 %h %p", transport: "ts-serve", address: "magicdns" },
+    { host: "100.110.98.100", port: 2222, proxy: "nc -x localhost:1055 %h %p", transport: "ts-serve", address: "tailnet-ip" },
+    { host: "fd7a:115c:a1e0::323b:6265", port: 2222, proxy: "nc -x localhost:1055 %h %p", transport: "ts-serve", address: "tailnet-ip" },
   ]);
 });
 

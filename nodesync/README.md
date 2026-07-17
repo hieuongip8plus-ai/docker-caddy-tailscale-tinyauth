@@ -50,7 +50,8 @@ và remote node ID.
 Tailscale chạy trong sidecar userspace, còn user `nodesync`, identity file và
 workspace nằm trên host runner. Vì vậy sidecar chỉ làm network transport: host
 startup luôn cấu hình `tailscale serve --tcp=2222 tcp://host.docker.internal:22`;
-NodeSync kết nối qua SOCKS5 `tailscale:1055` và xác thực với host sshd bằng
+NodeSync dùng chung network namespace với sidecar Tailscale, kết nối qua SOCKS5
+`localhost:1055` và xác thực với host sshd bằng
 SSH key/password. Không bật Tailscale SSH port 22 trong sidecar vì kết nối đó sẽ
 terminate trong container sai ownership, không thấy user/filesystem của host.
 

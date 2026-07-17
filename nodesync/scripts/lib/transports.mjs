@@ -2,7 +2,7 @@
 // Pure endpoint construction for predecessor sync. Keep network-namespace
 // decisions here so they can be unit tested without Docker or a live tailnet.
 
-const TAILSCALE_SOCKS_PROXY = "nc -x tailscale:1055 %h %p";
+const TAILSCALE_SOCKS_PROXY = "nc -x localhost:1055 %h %p";
 
 function clean(value) {
   return typeof value === "string" ? value.trim().replace(/\.$/, "") : "";

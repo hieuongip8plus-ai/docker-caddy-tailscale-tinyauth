@@ -34,7 +34,8 @@ RUN apk add --no-cache \
     && rm -rf /var/cache/apk/*
 
 # Tailscale chạy ở sidecar riêng. Nodesync chuyển mọi tailnet connection qua
-# SOCKS5 `tailscale:1055`; không gọi Docker host và không dựa system MagicDNS.
+# SOCKS5 `localhost:1055` khi dùng chung network namespace với tailscale; không
+# gọi Docker host và không dựa system MagicDNS.
 
 WORKDIR /app
 
