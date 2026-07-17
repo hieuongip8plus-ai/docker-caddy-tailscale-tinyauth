@@ -109,11 +109,22 @@ function verifyTool(tool) {
   if (r.ok) log(`verify OK: ${tool.verify}${r.out ? ` → ${r.out.split("\n")[0]}` : ""}`);
   return r.ok;
 }
+function linkTool(tool) {
+  if (!tool.linkTo || DRY) return;
+  const found = shell(`command -v ${tool.name}`, { timeout: 30000 });
+  if (!found.ok || !found.out) return;
+  const target = found.out.split("\n")[0];
+  const link = expandHome(tool.linkTo);
+  const r = shell(`sudo -n ln -sfn ${JSON.stringify(target)} ${JSON.stringify(link)}`, { timeout: 30000 });
+  if (r.ok) log(`linked ${tool.name}: ${link} -> ${target}`);
+  else warn(`cannot link ${tool.name} to ${link}: ${r.err || `exit ${r.code}`}`);
+}
 
 function installTool(tool) {
   log(`==> tool "${tool.name}"`);
 
   if (SKIP_IF_PRESENT && verifyTool(tool)) {
+    linkTool(tool);
     log(`already present, skip (use --force to reinstall) → ${tool.name}`);
     return { name: tool.name, ok: true, method: "present" };
   }
@@ -145,6 +156,7 @@ function installTool(tool) {
     }
 
     if (verifyTool(tool)) {
+      linkTool(tool);
       log(`SUCCESS: "${tool.name}" installed via "${m.id}"`);
       return { name: tool.name, ok: true, method: m.id };
     }

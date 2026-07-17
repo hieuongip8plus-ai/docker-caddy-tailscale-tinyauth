@@ -23,7 +23,7 @@
     "ssh:env": "node nodesync/scripts/ssh-setup-env.mjs --env .env.dockercaddytailscaletinyauth",
     "ssh:key-acl": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$p='.secret/nodesync_id_ed25519'; $u=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name; icacls $p /inheritance:r; icacls $p /grant:r \\\"$u`:F\\\"; icacls $p /remove:g Users 'Authenticated Users' Everyone 2>$null\"",
     "pressh:nodesync": "npm run ssh:key-acl",
-    "ssh:nodesync": "ssh -i .secret/nodesync_id_ed25519 -o IdentitiesOnly=yes -o PubkeyAuthentication=yes -o PasswordAuthentication=yes -o ProxyCommand=\"cloudflared access ssh --hostname ssh.dockercaddytailscaletinyauth.dpdns.org\" nodesync@ssh.dockercaddytailscaletinyauth.dpdns.org",
+    "ssh:nodesync": "ssh -t -i .secret/nodesync_id_ed25519 -o IdentitiesOnly=yes -o PubkeyAuthentication=yes -o PasswordAuthentication=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o GlobalKnownHostsFile=NUL -o LogLevel=ERROR -o ProxyCommand=\"cloudflared access ssh --hostname ssh.dockercaddytailscaletinyauth.dpdns.org\" nodesync@ssh.dockercaddytailscaletinyauth.dpdns.org \"cd /workspace 2>/dev/null || cd /home/runner/work/docker-caddy-tailscale-tinyauth/docker-caddy-tailscale-tinyauth; exec sh -l\"",
     "provision": "node cloudflare/scripts/provision-tunnel.mjs --env .env.dockercaddytailscaletinyauth",
     "tunnel:delete-connections": "node cloudflare/scripts/provision-tunnel.mjs --env .env.dockercaddytailscaletinyauth --delete-connections",
     "ts-status": "node tailscale/scripts/status.mjs",

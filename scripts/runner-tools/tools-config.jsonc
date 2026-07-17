@@ -8,6 +8,7 @@
   //   verify  : command run to confirm the tool is installed & on PATH
   //   pathAdd : (optional) dirs to prepend to PATH / append to $GITHUB_PATH
   //             (supports $HOME). Tried before each verify.
+  //   linkTo  : (optional) symlink target in a global PATH dir for SSH users.
   //   methods : ordered list of install methods; tried top→bottom until one
   //             verifies successfully. Each: { id, run, needs? }
   //             - id    : short label for logs
@@ -20,6 +21,7 @@
       "name": "opencode",
       "verify": "opencode --version",
       "pathAdd": ["$HOME/.opencode/bin"],
+      "linkTo": "/usr/local/bin/opencode",
       "methods": [
         {
           "id": "official-script",

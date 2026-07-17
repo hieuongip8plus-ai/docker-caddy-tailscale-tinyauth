@@ -30,6 +30,7 @@ mkdirSync(runtime,{recursive:true});if(!existsSync(keyFile))throw new Error(`mis
 if(process.platform!=="linux")throw new Error("sshd bootstrap requires Linux");
 const install=spawnSync("sh",["-lc","command -v sshd >/dev/null && command -v rsync >/dev/null && command -v sshpass >/dev/null || (sudo -n apt-get update -qq && sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server rsync sshpass)"]);if(install.status!==0)throw new Error("non-interactive SSH dependencies install failed");
 sudo("mkdir",["-p","/run/sshd","/etc/ssh/sshd_config.d","/etc/nodesync"]);sudo("install",["-m","0644",identityFile,"/etc/nodesync/node-id"]);
+sudo("ln",["-sfn",ROOT,"/workspace"]);
 grantSyncReads();
 const dropin=["PasswordAuthentication yes","KbdInteractiveAuthentication no","PubkeyAuthentication yes","PermitRootLogin no","UsePAM yes","AllowTcpForwarding no","X11Forwarding no","PermitTTY yes",`AllowUsers ${users.join(" ")}`].join("\n")+"\n";
 const tmp=resolve(runtime,"99-nodesync.conf");writeFileSync(tmp,dropin);sudo("install",["-m","0644",tmp,"/etc/ssh/sshd_config.d/99-nodesync.conf"]);sudo("ssh-keygen",["-A"]);sudo("sshd",["-t"]);

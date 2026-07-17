@@ -50,6 +50,7 @@ Thêm một entry vào `tools-config.jsonc`:
   "name": "mytool",
   "verify": "mytool --version",
   "pathAdd": ["$HOME/.mytool/bin"],   // optional
+  "linkTo": "/usr/local/bin/mytool",  // optional, for SSH users/non-GHA shells
   "methods": [
     { "id": "official-script", "run": "curl -fsSL https://.../install | bash" },
     { "id": "npm",  "needs": "npm",  "run": "npm i -g mytool" },
