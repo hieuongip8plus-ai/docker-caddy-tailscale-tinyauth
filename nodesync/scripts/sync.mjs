@@ -12,6 +12,13 @@ const authUser=process.env.SSH_1_USER||"",authPass=process.env.SSH_1_PASS||proce
 const quote=(s)=>`'${String(s).replaceAll("'",`'\\''`)}'`,safePath=(p)=>{if(!p||p.startsWith("/")||p.split(/[\\/]+/).includes("..")||p==="."||p==="ci-runtime")throw new Error(`unsafe sync path: ${p}`);return p};
 const redact=(s)=>String(s).replaceAll(keyFile,"<keyFile>").replace(/SSHPASS=\S+/g,"SSHPASS=<hidden>");
 const cmdPreview=(cmd,args)=>redact([cmd,...args].map((x)=>/\s/.test(String(x))?quote(x):String(x)).join(" "));
+const probeFailure=(probe,source)=>probe.ok?(probe.out.trim()===source.nodeId?"":`node-id-mismatch expected=${source.nodeId} actual=${probe.out||"(empty)"}`):`ssh-failed status=${probe.status??"n/a"} stderr=${probe.err||"(none)"}`;
+function sourceInfo(channel,source){
+ if(channel==="tailscale")return{available:!!source.tailscale?.available,online:!!source.tailscale?.online,ip:source.tailscale?.ip||"",ips:source.tailscale?.ips||[],reason:source.tailscale?.reason||""};
+ if(channel==="cloudflare")return{domain:source.domain||"",host:source.domain?`ssh.${source.domain}`:""};
+ if(channel==="hybrid")return{ips:source.ssh?.ips||[],port:source.ssh?.port||22};
+ return{};
+}
 function exec(cmd,args,{timeout=30000,env={}}={}){return new Promise(resolveDone=>{const started=Date.now(),p=spawn(cmd,args,{stdio:["ignore","pipe","pipe"],env:{...process.env,...env}});let out="",err="",done=false;const finish=(result)=>{if(done)return;done=true;clearTimeout(timer);resolveDone({...result,out:out.trim(),err:err.trim(),durationMs:Date.now()-started})};p.stdout.on("data",d=>out+=d);p.stderr.on("data",d=>err+=d);p.on("error",e=>finish({ok:false,status:null,err:e.message}));p.on("close",code=>finish({ok:code===0,status:code}));const timer=setTimeout(()=>{p.kill("SIGKILL");finish({ok:false,status:null,err:`timeout ${timeout}ms`})},timeout)})}
 function endpoints(source){const map={tailscale:[],cloudflare:[],hybrid:[]};if(source.tailscale?.available&&source.tailscale?.online){const host=source.tailscale.ip||source.tailscale.ips?.[0];if(host)map.tailscale.push({host,port:source.ssh.tailscalePort||2222,proxy:"nc -x tailscale:1055 %h %p"})}if(source.domain)for(let attempt=1;attempt<=3;attempt++)map.cloudflare.push({host:`ssh.${source.domain}`,port:22,attempt,proxy:"docker exec -i cloudflared cloudflared access ssh --hostname %h"});for(const host of source.ssh.ips||[])map.hybrid.push({host,port:source.ssh.port||22});return map}
 function knownHost(c,source,channel){const parts=String(source.ssh.hostKey||"").trim().split(/\s+/);if(parts.length<3)throw new Error("invalid source SSH host key");const file=resolve(runtime,`known_hosts.${channel}`);writeFileSync(file,`${c.port===22?c.host:`[${c.host}]:${c.port}`} ${parts.slice(1).join(" ")}\n`,{mode:0o600});return file}
@@ -21,15 +28,15 @@ function inventory(root,{exclude=[]}={}){const files=[],dirs=[];if(!existsSync(r
 function verifySmoke(root){const file=resolve(root,"manifest.json");if(!existsSync(file))throw new Error("smoke manifest missing after rsync");const manifest=JSON.parse(readFileSync(file,"utf8")),actual=inventory(root,{exclude:["manifest.json"]});const verified=actual.checksum===manifest.checksum;if(!verified)throw new Error(`smoke checksum mismatch expected=${manifest.checksum} actual=${actual.checksum}`);return{expectedChecksum:manifest.checksum,checksumVerified:true,sourceCreatedAt:manifest.createdAt}}
 
 async function syncChannel(channel,source,selfId){
- const startedAt=new Date().toISOString(),begin=Date.now(),report={version:1,channel,source:source.nodeId,current:selfId,startedAt,status:"failed",attempts:[],endpointMetadata:[]};
+ const startedAt=new Date().toISOString(),begin=Date.now(),report={version:1,channel,source:source.nodeId,current:selfId,startedAt,status:"failed",sourceInfo:sourceInfo(channel,source),attempts:[],endpointMetadata:[]};
  try{
-  const list=endpoints(source)[channel]||[],modes=authModes();report.endpointMetadata=list.map(c=>({host:c.host,port:c.port,attempt:c.attempt||1,proxy:c.proxy||""}));log(`channel=${channel} endpoints=${JSON.stringify(report.endpointMetadata)} authModes=${modes.map(m=>m.name).join(",")||"(none)"} paths=${cfg.sync_paths.join(",")}`);
-  if(!list.length)throw new Error("no endpoint metadata");if(!modes.length)throw new Error("no SSH key or password available");
+  const list=endpoints(source)[channel]||[],modes=authModes();report.endpointMetadata=list.map(c=>({host:c.host,port:c.port,attempt:c.attempt||1,proxy:c.proxy||""}));log(`channel=${channel} sourceInfo=${JSON.stringify(report.sourceInfo)} endpoints=${JSON.stringify(report.endpointMetadata)} authModes=${modes.map(m=>m.name).join(",")||"(none)"} paths=${cfg.sync_paths.join(",")}`);
+  if(!list.length)throw new Error(`no endpoint metadata sourceInfo=${JSON.stringify(report.sourceInfo)}`);if(!modes.length)throw new Error("no SSH key or password available");
   outer:for(const c of list)for(const auth of modes){
    const args=sshArgs(c,source,channel,auth.name),target=`${authUser||source.ssh.user}@${c.host}`,probeArgs=[...auth.prefix,...args,target,`cat ${quote(source.ssh.identityFile)}`],probeCommand=cmdPreview(auth.cmd,probeArgs);log(`channel=${channel} probe start endpoint=${c.host}:${c.port} attempt=${c.attempt||1} auth=${auth.name} proxy=${c.proxy||"(none)"} command=${probeCommand}`);
-   const probe=await exec(auth.cmd,probeArgs,{timeout:30000,env:auth.env}),verified=probe.ok&&probe.out.trim()===source.nodeId;
-   report.attempts.push({endpoint:`${c.host}:${c.port}`,attempt:c.attempt||1,auth:auth.name,proxy:c.proxy||"",command:probeCommand,verified,durationMs:probe.durationMs,status:probe.status,error:verified?undefined:(probe.err||`node id mismatch expected=${source.nodeId} actual=${probe.out}`)});
-   log(`channel=${channel} probe done endpoint=${c.host}:${c.port} auth=${auth.name} ok=${probe.ok} verified=${verified} status=${probe.status??"n/a"} durationMs=${probe.durationMs} stderr=${probe.err||"(none)"}`);
+   const probe=await exec(auth.cmd,probeArgs,{timeout:30000,env:auth.env}),verified=probe.ok&&probe.out.trim()===source.nodeId,reason=probeFailure(probe,source);
+   report.attempts.push({endpoint:`${c.host}:${c.port}`,attempt:c.attempt||1,auth:auth.name,proxy:c.proxy||"",command:probeCommand,verified,durationMs:probe.durationMs,status:probe.status,error:reason||undefined});
+   log(`channel=${channel} probe done endpoint=${c.host}:${c.port} auth=${auth.name} ok=${probe.ok} verified=${verified} reason=${reason||"(none)"} durationMs=${probe.durationMs}`);
    if(!verified)continue;
    report.endpoint=`${c.host}:${c.port}`;report.auth=auth.name;report.paths=[];
    for(const raw of cfg.sync_paths){
@@ -42,7 +49,7 @@ async function syncChannel(channel,source,selfId){
    }
    report.status="passed";break outer;
   }
-  if(report.status!=="passed")throw new Error("all endpoints/auth modes rejected");
+  if(report.status!=="passed")throw new Error(`all endpoints/auth modes rejected attempts=${JSON.stringify(report.attempts.map(({endpoint,attempt,auth,verified,durationMs,status,error})=>({endpoint,attempt,auth,verified,durationMs,status,error})))}`);
  }catch(e){report.error=e.message;warn(`channel=${channel} failed: ${e.message}`)}finally{report.finishedAt=new Date().toISOString();report.durationMs=Date.now()-begin;mkdirSync(reports,{recursive:true});writeFileSync(resolve(reports,`${channel}.json`),JSON.stringify(report,null,2)+"\n");log(`channel-report channel=${channel} status=${report.status} started=${startedAt} finished=${report.finishedAt} durationMs=${report.durationMs}`)}return report;
 }
 async function main(){log("=== SSH predecessor sync ===");if(!cfg.sync_paths.length){log("SSH_SYNC_PATHS empty; skip");return}if(!existsSync(predecessorFile))throw new Error(`missing discovery manifest ${predecessorFile}`);if(!existsSync(keyFile)&&!authPass)throw new Error("missing SSH key and password");const{source,selfId}=JSON.parse(readFileSync(predecessorFile,"utf8"));if(!source){log(`runner=${selfId} first runner; smoke source data retained for successor`);return}const channels=enabledChannels(cfg);let results;if(smoke)results=await Promise.all(channels.map(c=>syncChannel(c,source,selfId)));else{results=[];for(const c of channels){const r=await syncChannel(c,source,selfId);results.push(r);if(r.status==="passed")break}}const summary={smoke,source:source.nodeId,current:selfId,generatedAt:new Date().toISOString(),results:results.map(({channel,status,durationMs,error})=>({channel,status,durationMs,error}))};writeFileSync(resolve(reports,"summary.json"),JSON.stringify(summary,null,2)+"\n");if(!results.some(r=>r.status==="passed"))throw new Error("no SSH channel passed");log(`SSH SYNC PASS ${results.map(r=>`${r.channel}:${r.status}`).join(" ")}`)}
