@@ -26,7 +26,7 @@ async function main(){
   const nodes=(await db.ref(paths.nodes).get()).val()||{};
   const source=selectPredecessor(nodes,self,Date.now(),heartbeatTtlMs());
   const output={version:1,selfId:self,source,discoveredAt:new Date().toISOString()};
-  if(args.includes("--json")){console.log(JSON.stringify(output,null,2));return}
+  if(args.includes("--json")){console.log(JSON.stringify(output,null,2));process.exit(0)}
   console.error(source?`[nodesync-discovery] source=${source.nodeId} startedAt=${source.startedAt}`:"[nodesync-discovery] no predecessor; first runner skips sync");
 }
 if(resolve(process.argv[1]||"")===fileURLToPath(import.meta.url)) main().catch(e=>{console.error(e);process.exit(1)});
