@@ -111,6 +111,13 @@ function describeSnapshotVi(label) {
   return SNAPSHOT_VI[label] || "trạng thái election (chưa có diễn giải riêng)";
 }
 
+function describeHandoffStep(step) {
+  if (typeof step === "string") return step;
+  if (step?.name) return step.name;
+  if (step?.shell) return step.name || "shell";
+  return "unknown";
+}
+
 async function logElectionSnapshot(label, extra = {}) {
   try {
     log(`Election snapshot: ${label} (${describeSnapshotVi(label)})`, { ...extra, ...(await getElectionSnapshot()) });
@@ -275,6 +282,7 @@ async function main() {
 
       // Snapshot leader cũ TRƯỚC khi nhường ghế (để ghi vào record handoff-log).
       const oldLeaderSnapshot = await getLeader();
+      const oldLeaderNextActions = (config.handoff_pipeline || []).map(describeHandoffStep);
 
       // [YC②] chạy pipeline: upload dữ liệu, stop cloudflared (nhường tunnel)...
       let pipelineResults = [];
@@ -315,6 +323,7 @@ async function main() {
       await pushHandoffLog({
         oldLeader: { nodeId: identity.nodeId, host: identity.host, term },
         newLeader: { nodeId: successor.id, host: successor.node?.host || null, term: term + 1 },
+        oldLeaderNextActions,
         oldLeaderTasks,
         reason: "handoff",
         term: term + 1,

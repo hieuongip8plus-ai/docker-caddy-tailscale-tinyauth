@@ -2,7 +2,7 @@
 // Đọc NHẬT KÝ CHUYỂN GIAO LEADER từ RTDB.
 //
 // YÊU CẦU: chỉ lưu 1 record / lần đổi leader THẬT SỰ (leader cũ ≠ leader mới).
-// Mỗi record: { oldLeader, newLeader, oldLeaderTasks, at, atVi, term, reason }.
+// Mỗi record: { oldLeader, newLeader, oldLeaderNextActions, oldLeaderTasks, at, atVi, term, reason }.
 //
 //   node scripts/handoff-log.mjs            # in toàn bộ (mới→cũ, giới hạn 100)
 //   node scripts/handoff-log.mjs --limit 50 # số dòng tối đa
@@ -30,6 +30,11 @@ function fmtLeader(l) {
 function fmtTasks(tasks) {
   if (!Array.isArray(tasks) || tasks.length === 0) return "(không có — leader cũ đã chết/signal, không chạy pipeline)";
   return tasks.map((t) => `  • ${t.hook}: ${t.ok ? "OK" : "FAIL"}${t.error ? ` — ${t.error}` : ""}`).join("\n");
+}
+
+function fmtActions(actions) {
+  if (!Array.isArray(actions) || actions.length === 0) return "(không có)";
+  return actions.map((name) => `  • ${name}`).join("\n");
 }
 
 async function main() {
@@ -61,7 +66,9 @@ async function main() {
     out(`\n  [${t}] reason=${e.reason || "handoff"} term=${e.term ?? "?"}`);
     out(`    Leader cũ: ${fmtLeader(e.oldLeader)}`);
     out(`    Leader mới: ${fmtLeader(e.newLeader)}`);
-    out(`    Việc leader cũ đã làm:`);
+    out(`    Việc leader cũ sẽ làm sau đó:`);
+    out(fmtActions(e.oldLeaderNextActions));
+    out(`    Kết quả:`);
     out(fmtTasks(e.oldLeaderTasks));
   }
   out("");

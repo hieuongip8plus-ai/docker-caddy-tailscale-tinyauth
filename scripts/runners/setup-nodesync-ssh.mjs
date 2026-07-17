@@ -22,6 +22,7 @@ const dropin=["PasswordAuthentication yes","KbdInteractiveAuthentication no","Pu
 const tmp=resolve(runtime,"99-nodesync.conf");writeFileSync(tmp,dropin);sudo("install",["-m","0644",tmp,"/etc/ssh/sshd_config.d/99-nodesync.conf"]);sudo("ssh-keygen",["-A"]);sudo("sshd",["-t"]);
 if(spawnSync("sh",["-lc","command -v systemctl >/dev/null && systemctl list-unit-files ssh.service >/dev/null 2>&1"]).status===0)sudo("systemctl",["restart","ssh"]);else sudo("sh",["-lc","pkill -HUP sshd || /usr/sbin/sshd"]);
 const hostKey=run("ssh-keyscan",["-T","5","-t","ed25519","127.0.0.1"],{capture:true}).split("\n").find(x=>x&&!x.startsWith("#"));if(!hostKey)throw new Error("SSH host key unavailable");
-const fingerprint=run("ssh-keygen",["-lf","/dev/stdin"],{capture:true,input:hostKey}),ips=Object.values(networkInterfaces()).flat().filter(x=>x&&!x.internal).map(x=>x.address);
+const hostKeyFile=resolve(runtime,"host-ed25519.pub");writeFileSync(hostKeyFile,hostKey+"\n",{mode:0o600});
+const fingerprint=run("ssh-keygen",["-lf",hostKeyFile],{capture:true}),ips=Object.values(networkInterfaces()).flat().filter(x=>x&&!x.internal).map(x=>x.address);
 const manifest={version:2,nodeId,user:sshUser,users,port:22,tailscalePort:2222,host:hostname(),ips,workspace:ROOT,hostKey,fingerprint,identityFile:"/etc/nodesync/node-id",generatedAt:new Date().toISOString()};writeFileSync(manifestFile,JSON.stringify(manifest,null,2)+"\n",{mode:0o600});
 console.log(`[nodesync-ssh] READY users=${users.join(",")} node=${nodeId} fingerprint=${fingerprint}`);
