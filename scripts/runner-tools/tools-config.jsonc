@@ -1,0 +1,46 @@
+{
+  // =========================================================================
+  // tools-config.jsonc — registry of external CLI tools installed in the runner
+  // (consumed by scripts/runner-tools/install-tool.mjs)
+  //
+  // Entry schema:
+  //   name    : logical tool name (used on CLI: `node install-tool.mjs <name>`)
+  //   verify  : command run to confirm the tool is installed & on PATH
+  //   pathAdd : (optional) dirs to prepend to PATH / append to $GITHUB_PATH
+  //             (supports $HOME). Tried before each verify.
+  //   methods : ordered list of install methods; tried top→bottom until one
+  //             verifies successfully. Each: { id, run, needs? }
+  //             - id    : short label for logs
+  //             - run   : shell command executed via `bash -lc`
+  //             - needs : (optional) command that must exist for this method
+  //                       to be attempted (e.g. "npm", "brew", "bun")
+  // =========================================================================
+  "tools": [
+    {
+      "name": "opencode",
+      "verify": "opencode --version",
+      "pathAdd": ["$HOME/.opencode/bin"],
+      "methods": [
+        {
+          "id": "official-script",
+          "run": "curl -fsSL https://opencode.ai/install | bash"
+        },
+        {
+          "id": "npm",
+          "needs": "npm",
+          "run": "npm i -g opencode-ai"
+        },
+        {
+          "id": "bun",
+          "needs": "bun",
+          "run": "bun install -g opencode-ai"
+        },
+        {
+          "id": "brew",
+          "needs": "brew",
+          "run": "brew install anomalyco/tap/opencode || brew install opencode"
+        }
+      ]
+    }
+  ]
+}
