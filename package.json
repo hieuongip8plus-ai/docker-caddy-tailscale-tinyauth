@@ -20,7 +20,7 @@
     "litestream:config": "node litestream/scripts/generate-config.mjs",
     "litestream:restore": "node litestream/scripts/restore.mjs",
     "rclone:pull": "node rclone/scripts/pull.mjs",
-    "ssh:env": "npm run ssh:env --prefix nodesync",
+    "ssh:env": "node nodesync/scripts/ssh-setup-env.mjs --env .env.dockercaddytailscaletinyauth",
     "provision": "node cloudflare/scripts/provision-tunnel.mjs --env .env.dockercaddytailscaletinyauth",
     "ts-status": "node tailscale/scripts/status.mjs",
     "ts-init": "node tailscale/scripts/init.mjs --env .env.dockercaddytailscaletinyauth",

@@ -18,6 +18,8 @@ export function selectPredecessor(nodes, selfId, now=Date.now(), ttl=90000) {
 async function main(){
   const args=process.argv.slice(2);
   if(args.includes("--path")){console.log(PREDECESSOR_FILE);return}
+  const json = args.includes("--json");
+  if(json) console.log = (...a) => console.error(...a);
   const [{ connectRtdb }, { getNodeIdentity, heartbeatTtlMs }] = await Promise.all([
     import("./lib/rtdb.mjs"),
     import("./lib/node-identity.mjs"),
@@ -26,7 +28,7 @@ async function main(){
   const nodes=(await db.ref(paths.nodes).get()).val()||{};
   const source=selectPredecessor(nodes,self,Date.now(),heartbeatTtlMs());
   const output={version:1,selfId:self,source,discoveredAt:new Date().toISOString()};
-  if(args.includes("--json")){console.log(JSON.stringify(output,null,2));process.exit(0)}
+  if(json){process.stdout.write(JSON.stringify(output,null,2)+"\n");process.exit(0)}
   console.error(source?`[nodesync-discovery] source=${source.nodeId} startedAt=${source.startedAt}`:"[nodesync-discovery] no predecessor; first runner skips sync");
 }
 if(resolve(process.argv[1]||"")===fileURLToPath(import.meta.url)) main().catch(e=>{console.error(e);process.exit(1)});
