@@ -43,8 +43,8 @@ export function collectSshUsers() {
         user: v,
         // Cho biết có được cấp key/pass không (không ghi giá trị).
         hasPassword: !!process.env[`SSH_${idx}_PASS`],
-        hasPublicKey: !!process.env[`SSH_${idx}_PUBLIC_KEY`],
-        hasPrivateKey: !!process.env[`SSH_${idx}_PRIVATE_KEY`],
+        hasPublicKey: !!process.env[`SSH_${idx}_PUBLIC_KEY_BASE64`],
+        hasPrivateKey: !!process.env[`SSH_${idx}_PRIVATE_KEY_BASE64`],
         // Quyền: cho phép chạy mọi lệnh (sudo NOPASSWD) — mặc định true theo yêu cầu.
         privileged: String(process.env[`SSH_${idx}_PRIVILEGED`] ?? "1").toLowerCase() !== "0",
       });

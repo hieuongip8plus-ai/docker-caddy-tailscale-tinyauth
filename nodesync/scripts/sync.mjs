@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { loadConfig, enabledChannels, workspaceDir, truthy } from "./lib/env.mjs";
 import { log, warn, error } from "./lib/log.mjs";
 const cfg=loadConfig(),ws=workspaceDir(),runtime=process.env.SSH_RUNTIME_DIR||"/runtime";
-const predecessorFile=process.env.SSH_PREDECESSOR_FILE||`${runtime}/predecessor.json`,keyFile=process.env.SSH_KEY_FILE||`${runtime}/id_ed25519`,reports=resolve(ws,"ci-runtime/nodesync/reports"),smoke=truthy(process.env.SSH_SYNC_SMOKE_ENABLE);
+const predecessorFile=`${runtime}/predecessor.json`,keyFile=`${runtime}/id_ed25519`,reports=resolve(ws,"ci-runtime/nodesync/reports"),smoke=truthy(process.env.SSH_SYNC_SMOKE_ENABLE);
 const authUser=process.env.SSH_1_USER||"",authPass=process.env.SSH_1_PASS||process.env.SSH_1_PASSWORD||"";
 const quote=(s)=>`'${String(s).replaceAll("'",`'\\''`)}'`,safePath=(p)=>{if(!p||p.startsWith("/")||p.split(/[\\/]+/).includes("..")||p==="."||p==="ci-runtime")throw new Error(`unsafe sync path: ${p}`);return p};
 function exec(cmd,args,{timeout=30000,env={}}={}){return new Promise(resolveDone=>{const started=Date.now(),p=spawn(cmd,args,{stdio:["ignore","pipe","pipe"],env:{...process.env,...env}});let out="",err="",done=false;const finish=(result)=>{if(done)return;done=true;clearTimeout(timer);resolveDone({...result,out:out.trim(),err:err.trim(),durationMs:Date.now()-started})};p.stdout.on("data",d=>out+=d);p.stderr.on("data",d=>err+=d);p.on("error",e=>finish({ok:false,status:null,err:e.message}));p.on("close",code=>finish({ok:code===0,status:code}));const timer=setTimeout(()=>{p.kill("SIGKILL");finish({ok:false,status:null,err:`timeout ${timeout}ms`})},timeout)})}

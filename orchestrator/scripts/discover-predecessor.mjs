@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Chọn runner sống đã lên trước current node; không phụ thuộc tên node01/node02.
-import { writeFileSync } from "node:fs";
-import { connectRtdb } from "./lib/rtdb.mjs";
-import { getNodeIdentity, heartbeatTtlMs } from "./lib/node-identity.mjs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+export const PREDECESSOR_FILE = "/workspace/ci-runtime/nodesync/predecessor.json";
 export function selectPredecessor(nodes, selfId, now=Date.now(), ttl=90000) {
   const self=nodes[selfId]; if(!self) return null;
   const candidates=Object.entries(nodes)
@@ -16,12 +16,17 @@ export function selectPredecessor(nodes, selfId, now=Date.now(), ttl=90000) {
   return candidates.length ? { nodeId:candidates[0][0], ...candidates[0][1] } : null;
 }
 async function main(){
+  const args=process.argv.slice(2);
+  if(args.includes("--path")){console.log(PREDECESSOR_FILE);return}
+  const [{ connectRtdb }, { getNodeIdentity, heartbeatTtlMs }] = await Promise.all([
+    import("./lib/rtdb.mjs"),
+    import("./lib/node-identity.mjs"),
+  ]);
   const {db,paths}=connectRtdb(); const self=getNodeIdentity().nodeId;
   const nodes=(await db.ref(paths.nodes).get()).val()||{};
   const source=selectPredecessor(nodes,self,Date.now(),heartbeatTtlMs());
   const output={version:1,selfId:self,source,discoveredAt:new Date().toISOString()};
-  const out=process.env.SSH_PREDECESSOR_FILE||"/workspace/ci-runtime/nodesync/predecessor.json";
-  writeFileSync(out,JSON.stringify(output,null,2)+"\n");
-  console.log(source?`[nodesync-discovery] source=${source.nodeId} startedAt=${source.startedAt}`:"[nodesync-discovery] no predecessor; first runner skips sync");
+  if(args.includes("--json")){console.log(JSON.stringify(output,null,2));return}
+  console.error(source?`[nodesync-discovery] source=${source.nodeId} startedAt=${source.startedAt}`:"[nodesync-discovery] no predecessor; first runner skips sync");
 }
-if(import.meta.url===`file://${process.argv[1]}`) main().catch(e=>{console.error(e);process.exit(1)});
+if(resolve(process.argv[1]||"")===fileURLToPath(import.meta.url)) main().catch(e=>{console.error(e);process.exit(1)});

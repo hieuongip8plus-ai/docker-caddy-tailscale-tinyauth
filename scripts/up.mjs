@@ -69,9 +69,10 @@ function truthy(value) {
 }
 function getNodesyncConfig() {
   const env = { ...parseEnv(ENV), ...process.env };
+  const smoke = truthy(env.SSH_SYNC_SMOKE_ENABLE);
   return {
     enabled: truthy(env.SSH_ENABLE),
-    syncOnStart: String(env.SSH_SYNC_PATHS || env.SSH_SYNC_PATHS || "").split(",").some(Boolean),
+    syncOnStart: String(env.SSH_SYNC_PATHS || (smoke ? "ci-runtime/smoke-sync-data" : "")).split(",").some(Boolean),
     tailscale: truthy(env.SSH_CHANNEL_TAILSCALE_ENABLE ?? "1"),
     orchestratorEnabled: truthy(env.CONSUL_ENABLE),
   };
@@ -191,7 +192,7 @@ if (nodesync.enabled && nodesync.syncOnStart) {
   await waitNodesync();
   // 3) Chờ RTDB server timestamp ổn định rồi discover predecessor.
   if (!DRY_RUN) await new Promise((done) => setTimeout(done, 3000));
-  run(compose(`exec -T orchestrator node scripts/discover-predecessor.mjs`));
+  run(compose(`exec -T orchestrator node scripts/discover-predecessor.mjs --json > ci-runtime/nodesync/predecessor.json`));
   // 4) Sync configured paths từ predecessor (đọc predecessor.json ở bước 3).
   run(compose(`exec -T nodesync node scripts/sync.mjs${SILENT ? " --silent" : ""}`));
   log("Nodesync pre-start hoàn tất.");

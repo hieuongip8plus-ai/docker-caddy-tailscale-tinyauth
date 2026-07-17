@@ -3,11 +3,13 @@ import { createHash, randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseEnv } from "../../scripts/lib/env-utils.mjs";
 
 const ROOT=resolve(dirname(fileURLToPath(import.meta.url)),"../..");
-const dir=resolve(ROOT,"ci-runtime/smoke-sync-data"), envFile=resolve(ROOT,".env");
+const args=process.argv.slice(2), envArg=args.indexOf("--env");
+const dir=resolve(ROOT,"ci-runtime/smoke-sync-data"), envFile=envArg>=0?resolve(args[envArg+1]):resolve(ROOT,".env");
 const truthy=(v)=>/^(1|true|yes|on)$/i.test(String(v??""));
-const enabled=truthy(process.env.SSH_SYNC_SMOKE_ENABLE)||(existsSync(envFile)&&/^SSH_SYNC_SMOKE_ENABLE=(1|true|yes|on)$/im.test(readFileSync(envFile,"utf8")));
+const enabled=truthy(process.env.SSH_SYNC_SMOKE_ENABLE)||(existsSync(envFile)&&truthy(parseEnv(envFile).SSH_SYNC_SMOKE_ENABLE));
 if(!enabled){console.log("[ssh-smoke] disabled");process.exit(0)}
 const sha=(file)=>createHash("sha256").update(readFileSync(file)).digest("hex");
 function inventory(root){

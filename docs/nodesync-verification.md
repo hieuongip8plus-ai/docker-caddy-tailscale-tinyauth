@@ -26,11 +26,14 @@ node scripts/runners/setup-nodesync-ssh.mjs
 
 Không log password, private key hoặc token. GitHub dùng `::add-mask::`; Azure dùng
 `##vso[task.setsecret]`.
+`discover-predecessor.mjs --json` chỉ in manifest; runner ghi vào
+`ci-runtime/nodesync/predecessor.json`. `--path` in đường dẫn container nếu cần
+debug.
 
 ## Cloudflare SSH
 
 Ingress `ssh.<DOMAIN> → ssh://host.docker.internal:22` nằm trong
-`cloudflare/scripts/hostnames.jsonc`. Tạo tunnel và Access service token:
+`cloudflare/scripts/hostnames.jsonc`. Tạo/cập nhật tunnel:
 
 ```dotenv
 CF_API_EMAIL=<email>
@@ -41,16 +44,9 @@ CF_API_KEY_GLOBAL=<global-api-key>
 node cloudflare/scripts/provision-tunnel.mjs --env .env --silent
 ```
 
-Provisioner ghi các biến theo nhóm `CF_*`:
-
-```dotenv
-CF_SSH_TUNNEL_SERVICE_TOKEN_NAME=<name>
-CF_SSH_TUNNEL_SERVICE_TOKEN_ID=<client-id>
-CF_SSH_TUNNEL_SERVICE_TOKEN_SECRET=<client-secret>
-```
-
-Secret được mask và chỉ ghi lúc API trả về. Nếu ID tồn tại nhưng secret bị mất,
-provisioner tạo token mới vì Cloudflare không trả lại secret cũ.
+Không dùng Cloudflare Access service token. Tunnel token hiện tại chạy connector;
+client dùng `cloudflared access ssh --hostname ssh.<DOMAIN>` rồi SSH xác thực
+bằng user/password hoặc key.
 
 ## Smoke test ba channel
 
