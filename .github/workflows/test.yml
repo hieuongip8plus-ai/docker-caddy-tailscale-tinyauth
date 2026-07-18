@@ -23,9 +23,21 @@ env:
   DOCKER_BUILD_SUMMARY: "false"
   DOCKER_BUILD_RECORD_UPLOAD: "false"
 
+# Full GITHUB_TOKEN permissions — issues, packages, releases, deployments, etc.
 permissions:
-  contents: read
+  actions: write
+  checks: write
+  contents: write
+  deployments: write
+  discussions: write
+  id-token: write
   issues: write
+  packages: write
+  pages: write
+  pull-requests: write
+  repository-projects: write
+  security-events: write
+  statuses: write
 
 jobs:
   smoke:
