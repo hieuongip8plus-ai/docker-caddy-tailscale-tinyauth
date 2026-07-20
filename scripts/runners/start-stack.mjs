@@ -7,12 +7,24 @@
 //   --dry-run   Show commands without running
 //   --silent    Suppress output
 import { execSync, spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectDocker } from "./_docker.mjs";
-import { envGet, parseEnv } from "../lib/env-utils.mjs";
+import { envGet } from "../lib/env-utils.mjs";
 import { redactSecrets } from "../lib/redact-utils.mjs";
+import {
+  hasLitestreamConfig as libHasLitestream,
+  hasRcloneConfig as libHasRclone,
+  nodesyncConfig as libNodesyncConfig,
+  firstIndexedName as libFirstIndexedName,
+  uniqueTsHostname,
+  sanitizeTsExtraArgs,
+  readPredecessor,
+  waitForHealthy as libWaitForHealthy,
+  waitForTailscale as libWaitForTailscale,
+  waitForServiceRunning,
+  probePredecessorSocks,
+} from "../lib/stack-lib.mjs";
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes("--dry-run");
@@ -70,45 +82,20 @@ function sh(cmd) {
 }
 
 function hasLitestreamConfig(envFile) {
-  const env = { ...parseEnv(envFile), ...process.env };
-  return Object.keys(env).some((key) => /^LITESTREAM_\d+_SERVICE$/.test(key));
+  return libHasLitestream(envFile);
 }
 
 function hasRcloneConfig(envFile) {
-  const env = { ...parseEnv(envFile), ...process.env };
-  return Object.keys(env).some((key) => /^RCLONE_\d+_NAME$/.test(key));
+  return libHasRclone(envFile);
 }
 
 // nodesync bật khi SSH_ENABLE=1 (đồng bộ dữ liệu giữa node qua SSH).
-function envTruthy(value) {
-  return ["1", "true", "yes", "on"].includes(String(value ?? "0").toLowerCase());
-}
-
 function nodesyncConfig(envFile) {
-  const env = { ...parseEnv(envFile), ...process.env };
-  const smoke = envTruthy(env.SSH_SYNC_SMOKE_ENABLE);
-  return {
-    enabled: envTruthy(env.SSH_ENABLE),
-    paths: String(env.SSH_SYNC_PATHS || (smoke ? "ci-runtime/smoke-sync-data" : ""))
-      .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean),
-    tailscaleChannel: envTruthy(env.SSH_CHANNEL_TAILSCALE_ENABLE ?? "1"),
-    cloudflareChannel: envTruthy(env.SSH_CHANNEL_CLOUDFLARE_ENABLE),
-    hybridChannel: envTruthy(env.SSH_CHANNEL_HYBRID_ENABLE),
-    orchestratorEnabled: envTruthy(env.CONSUL_ENABLE),
-  };
+  return libNodesyncConfig(envFile);
 }
 
 function firstIndexedName(envFile, prefix, key) {
-  const env = { ...parseEnv(envFile), ...process.env };
-  const indexes = Object.keys(env)
-    .map((name) => name.match(new RegExp(`^${prefix}_(\\d+)_${key}$`))?.[1])
-    .filter(Boolean)
-    .sort((a, b) => Number(a) - Number(b));
-  if (indexes.length === 0) return "";
-  const index = indexes[0];
-  return `${prefix.toLowerCase()}-${index}-${env[`${prefix}_${index}_${key}`]}`.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  return libFirstIndexedName(envFile, prefix, key);
 }
 
 function ensureProfile(name, envFile) {
@@ -127,61 +114,23 @@ function composeArgs(command) {
   return dc(`compose ${files}${command}`);
 }
 
+// deps chung cho stack-lib (inject run/sh/dc/log để dễ test + tái dùng).
+const runCapture = (cmd, argv, timeoutMs = 15000) => {
+  try {
+    const out = execSync([cmd, ...argv].join(" "), { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], timeout: timeoutMs }).toString().trim();
+    return { ok: true, out };
+  } catch (e) {
+    return { ok: false, out: (e.stderr || e.message || "").toString() };
+  }
+};
+const libDeps = { sh, dc, log, err, dryRun: DRY_RUN, runCapture };
+
 async function waitForHealthy(service, timeoutMs = 90_000) {
-  if (DRY_RUN) {
-    log(`[DRY RUN] chờ ${service} healthy`);
-    return;
-  }
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const status = sh(dc(`inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' ${service}`));
-      if (status === "healthy" || status === "running") return;
-      if (status === "unhealthy" || status === "exited") throw new Error(`${service} status=${status}`);
-    } catch (e) {
-      if (/status=(unhealthy|exited)/.test(e.message)) throw e;
-    }
-    await new Promise((done) => setTimeout(done, 2_000));
-  }
-  throw new Error(`${service} không healthy sau ${timeoutMs / 1000}s`);
+  return libWaitForHealthy(service, libDeps, timeoutMs);
 }
 
 async function waitForTailscale(timeoutMs = 60_000) {
-  if (DRY_RUN) {
-    log("[DRY RUN] chờ tailscale LocalAPI sẵn sàng");
-    return true;
-  }
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const output = sh(dc("exec tailscale tailscale status --json"));
-      const status = JSON.parse(output);
-      if (status?.Self?.Online || status?.BackendState === "Running") return true;
-    } catch {}
-    await new Promise((done) => setTimeout(done, 2_000));
-  }
-  return false;
-}
-function predecessorTailnetHost(file) {
-  if (DRY_RUN) return "";
-  try {
-    const source = JSON.parse(readFileSync(file, "utf8"))?.source;
-    const host = source?.tailscale?.dnsName?.replace(/\.$/, "") || source?.tailscale?.ip || "";
-    return /^[a-zA-Z0-9_.:-]+$/.test(host) ? host : "";
-  } catch {
-    return "";
-  }
-}
-function warmTailscalePeer(file, hasFallback) {
-  const host = predecessorTailnetHost(file);
-  if (!host) return;
-  try {
-    run(dc(`exec tailscale tailscale ping --c=1 ${host}`));
-  } catch {
-    const msg = `Tailscale peer ${host} chưa reachable; `;
-    if (!hasFallback) throw new Error(`${msg}không có channel fallback`);
-    err(`WARN: ${msg}sẽ thử Cloudflare/Hybrid fallback.`);
-  }
+  return libWaitForTailscale(libDeps, timeoutMs);
 }
 
 // chmod scripts
@@ -206,25 +155,8 @@ if (nodesync.enabled) {
   if (nodesync.tailscaleChannel) ensureProfile("tailscale", envFile);
   log(`Nodesync enabled; paths=${nodesync.paths.length}; tailscale-channel=${nodesync.tailscaleChannel}`);
 }
-// [YC] Hostname Tailscale phải DUY NHẤT theo từng runner. Nếu 2 runner cùng
-// hostname "proxy-stack", Tailscale coi là CÙNG một node (re-register đè) →
-// chỉ 1 IP tồn tại, runner kia mất tailnet IP → rsync qua tailscale hỏng.
-// Gắn hậu tố provider-runId-attempt (github/azure tự detect) để tách bạch.
-function uniqueTsHostname(base = "proxy-stack") {
-  const gh = process.env.GITHUB_ACTIONS === "true";
-  const az = process.env.TF_BUILD === "True" || !!process.env.BUILD_BUILDID;
-  let suffix = "";
-  if (gh) suffix = `gh-${process.env.GITHUB_RUN_ID || ""}-${process.env.GITHUB_RUN_ATTEMPT || "1"}`;
-  else if (az) suffix = `az-${process.env.BUILD_BUILDID || ""}-${process.env.SYSTEM_JOBATTEMPT || "1"}`;
-  if (!suffix) return base; // local dev: giữ nguyên
-  // Tailscale hostname: chỉ [a-z0-9-], tối đa 63 ký tự.
-  return `${base}-${suffix}`
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 63);
-}
+// [YC] Hostname Tailscale phải DUY NHẤT theo từng runner — dùng helper chung
+// từ stack-lib (uniqueTsHostname) để up.mjs và start-stack.mjs không lệch.
 if (nodesync.enabled && nodesync.tailscaleChannel) {
   const tsHost = uniqueTsHostname(envGet(envFile, "TS_HOSTNAME") || "proxy-stack");
   process.env.TS_HOSTNAME = tsHost;
@@ -232,10 +164,7 @@ if (nodesync.enabled && nodesync.tailscaleChannel) {
   // SSH identity, users and workspace live on the host runner, so do not enable
   // Tailscale SSH here; Serve TCP forwards tailnet:2222 to host sshd:22.
   const baseExtra = process.env.TS_EXTRA_ARGS || envGet(envFile, "TS_EXTRA_ARGS") || "--accept-dns=false";
-  process.env.TS_EXTRA_ARGS = baseExtra
-    .replace(/(?:^|\s)--ssh(?:=true)?(?=\s|$)/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  process.env.TS_EXTRA_ARGS = sanitizeTsExtraArgs(baseExtra);
   log(`Tailscale transport identity: hostname=${tsHost} extraArgs="${process.env.TS_EXTRA_ARGS}"`);
 }
 process.env.DOCKER_VOLUME_RUNTIME_ABS = resolveVolumeRoot(envGet(envFile, "DOCKER_VOLUME_RUNTIME"), "ci-runtime");
@@ -280,33 +209,38 @@ if (nodesync.enabled) {
         // at host.docker.internal:22 where nodesync users/data actually live.
         run(dc("exec tailscale tailscale serve --bg --tcp=2222 tcp://host.docker.internal:22"));
         log("Tailscale transport ready: tailnet:2222 → runner sshd:22 via userspace SOCKS5.");
-        // [YC #2] waitForTailscale() chỉ xác nhận CHÍNH node này online với
-        // control-plane, KHÔNG đảm bảo netmap/DERP path tới predecessor đã
-        // hội tụ xong. Trên GitHub-hosted runner, UDP outbound thường bị hạn
-        // chế nên WireGuard P2P phải fallback qua DERP relay — việc này cần
-        // thêm vài giây ở cả 2 phía trước khi SOCKS5 CONNECT hoạt động ổn định.
-        // Không chờ đủ → nc/ssh probe bị tailscaled từ chối ngay lập tức với
-        // "General SOCKS server failure" dù ACL đã cho phép mọi node.
-        const meshWarmupSec = Number(process.env.TS_MESH_WARMUP_SECONDS || 8);
-        if (meshWarmupSec > 0) {
-          log(`Chờ ${meshWarmupSec}s để Tailscale netmap/DERP hội tụ trước khi sync...`);
-          if (!DRY_RUN) await new Promise((done) => setTimeout(done, meshWarmupSec * 1000));
-        }
       }
     }
-    // Registration ghi node booting ngay; đợi ngắn để RTDB server timestamp ổn định.
-    if (!DRY_RUN) await new Promise((done) => setTimeout(done, 3000));
+    // [YC #2 — bỏ hard-wait] Trước đây sleep 8s "mesh warmup" + sleep 3s chờ RTDB
+    // timestamp. Nay: discover ngay (discover chỉ ĐỌC RTDB; register.mjs của
+    // orchestrator đã ghi node trước đó, RTDB read-after-write nhất quán đủ cho
+    // predecessor selection theo startedAt). Nếu chưa có predecessor, discover
+    // trả source=null → node ĐẦU TIÊN, skip warmup/rsync hoàn toàn.
     log("Discovering nodesync predecessor...");
     // Container discover là ONE-SHOT (--rm) và CHỈ ĐỌC RTDB (không register,
     // không onDisconnect) → an toàn, dùng chung node-id để tự loại mình khỏi
     // danh sách predecessor candidate.
     run(composeArgs(`run --rm --no-deps orchestrator node scripts/discover-predecessor.mjs --json > ci-runtime/nodesync/predecessor.json`));
-    log("Nodesync predecessor manifest ready.");
-    if (nodesync.tailscaleChannel) warmTailscalePeer(resolve(ROOT, "ci-runtime/nodesync/predecessor.json"), nodesync.cloudflareChannel || nodesync.hybridChannel);
-    // rsync: sync.mjs sẽ ghi cờ ci-runtime/nodesync/sync-ok khi xong → orchestrator
-    // (đang chờ ở sync-gate) mới được phép giành leader.
-    run(composeArgs(`exec -T nodesync node scripts/sync.mjs${SILENT ? " --silent" : ""}`));
-    log("Nodesync rsync hoàn tất (sync-ok đã ghi); orchestrator có thể giành leader.");
+    const predFile = resolve(ROOT, "ci-runtime/nodesync/predecessor.json");
+    const pred = DRY_RUN ? { hasPredecessor: false, host: "" } : readPredecessor(predFile);
+    if (!pred.hasPredecessor) {
+      // Node ĐẦU TIÊN: không predecessor → skip warm peer + rsync. sync.mjs sẽ
+      // tự ghi sync-ok "first-runner"; orchestrator giành leader trống (term=1).
+      log("Không có predecessor → node đầu tiên; skip mesh-probe & rsync, để sync.mjs ghi sync-ok(first-runner).");
+      run(composeArgs(`exec -T nodesync node scripts/sync.mjs${SILENT ? " --silent" : ""}`));
+      log("Nodesync (first-runner) hoàn tất; orchestrator có thể giành leader ngay.");
+    } else {
+      log(`Predecessor tìm thấy (host=${pred.host || "(chưa có tailnet host)"}).`);
+      if (nodesync.tailscaleChannel && pred.host) {
+        // Thay hard-wait 8s: probe SOCKS5 tới predecessor, retry ngắn, thoát ngay
+        // khi mở kết nối được. KHÔNG throw — sync.mjs còn warmup + fallback channel.
+        await probePredecessorSocks(pred.host, libDeps, { port: 2222 });
+      }
+      // rsync: sync.mjs sẽ ghi cờ ci-runtime/nodesync/sync-ok khi xong → orchestrator
+      // (đang chờ ở sync-gate) mới được phép giành leader.
+      run(composeArgs(`exec -T nodesync node scripts/sync.mjs${SILENT ? " --silent" : ""}`));
+      log("Nodesync rsync hoàn tất (sync-ok đã ghi); orchestrator có thể giành leader.");
+    }
   } else log("SSH_SYNC_PATHS rỗng: không discover/SSH/rsync.");
 }
 
@@ -366,12 +300,10 @@ if (DRY_RUN) {
   process.exit(0);
 }
 
-// Fail fast if cloudflared is not running
-execSync("sleep 3", { stdio: "inherit" });
-try {
-  const running = sh(dc("compose ps --status running --services"));
-  if (!running.split("\n").includes("cloudflared")) throw new Error("not running");
-} catch {
+// Fail fast if cloudflared is not running — poll thay vì sleep 3 mù (thoát sớm
+// khi ready, fail nhanh khi quá timeout).
+const cfReady = await waitForServiceRunning("cloudflared", libDeps, 30_000, 500);
+if (!cfReady) {
   err("ERROR: cloudflared is not running after up");
   try {
     run(dc("compose ps -a"));
@@ -381,3 +313,4 @@ try {
   } catch {}
   process.exit(1);
 }
+log("cloudflared running ✓");

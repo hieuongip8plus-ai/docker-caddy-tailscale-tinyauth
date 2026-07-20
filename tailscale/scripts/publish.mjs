@@ -34,9 +34,17 @@ import {
   resolvePublishConfig,
   SSH_FORWARD_PORT,
 } from "./lib/publish-lib.mjs";
+import {
+  computePublishHash,
+  readPublishState,
+  writePublishState,
+  shouldSkipPublish,
+  serveStatePresent,
+} from "./lib/publish-state.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "../..");
+const PUBLISH_STATE_FILE = resolve(ROOT, "ci-runtime/tailscale/published.json");
 const CONFIG_FILE = resolve(__dirname, "init.jsonc");
 
 const args = process.argv.slice(2);
@@ -254,8 +262,34 @@ async function main() {
     }
   }
 
+  // ── Idempotency (prompt mục 4): skip nếu config hash khớp + serve state còn ──
+  const hash = computePublishHash({ cfg, services });
+  const prevState = readPublishState(PUBLISH_STATE_FILE);
+  let serveConfirmed = true;
+  if (cfg.doServe) {
+    const serveStatus = dockerExec("compose exec -T tailscale tailscale serve status --json", { capture: true });
+    serveConfirmed = serveStatus.ok && serveStatus.out ? serveStatePresent(serveStatus.out) : false;
+  }
+  const decision = shouldSkipPublish({ hash, prevState, serveConfirmed, cfg });
+  log(`[idempotent] hash=${hash.slice(0, 12)} prev=${prevState?.hash?.slice(0, 12) || "(none)"} serveConfirmed=${serveConfirmed} → ${decision.skip ? "SKIP" : "PUBLISH"} (${decision.reason})`);
+  if (decision.skip && !DRY_RUN) {
+    log("Already published (config hash khớp + serve state còn tồn tại) — bỏ qua API PUT/POST & CLI advertise.");
+    log("Publish hoàn tất (no-op).");
+    return;
+  }
+
   if (cfg.doServe) applyServe(services, cfg);
   if (cfg.doServices) await applyServices(services, cfg);
+
+  // Ghi state sau khi publish thành công (best-effort, không làm gãy stack).
+  writePublishState(PUBLISH_STATE_FILE, {
+    hash,
+    mode: cfg.mode,
+    serveStyle: cfg.serveStyle,
+    tailnet: cfg.tailnet,
+    nodeHost: cfg.nodeHost,
+    services: services.map((s) => s.name),
+  });
 
   log("Publish hoàn tất.");
 }
