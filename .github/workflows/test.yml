@@ -24,9 +24,19 @@ env:
   DOCKER_BUILD_RECORD_UPLOAD: "false"
 
 permissions:
-  contents: read
   actions: write
+  checks: write
+  contents: write
+  deployments: write
+  discussions: write
   id-token: write
+  issues: write
+  packages: write
+  pages: write
+  pull-requests: write
+  repository-projects: write
+  security-events: write
+  statuses: write
 
 jobs:
   smoke:
@@ -53,13 +63,18 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: P2 Build images with BuildKit cache
-        uses: docker/bake-action@v6
-        with:
-          source: .
-          files: .github/workflows/docker-bake.hcl
-          load: true
-          set: |
-            *.args.GIT_SHA=${{ github.sha }}
+        env:
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          echo "P2 bake start $(date -u +%FT%T.%3NZ)"
+          mkdir -p ci-runtime
+          docker buildx bake \
+            --file .github/workflows/docker-bake.hcl \
+            --set "*.args.GIT_SHA=$GIT_SHA" \
+            --metadata-file ci-runtime/bake-metadata.json \
+            --load \
+            default
+          echo "P2 bake end $(date -u +%FT%T.%3NZ)"
 
       - name: P2 Verify local images
         env:

@@ -91,12 +91,15 @@ function digestFromMeta(entry) {
 function main() {
   log(`=== Verify stack images (commit=${COMMIT}) ===`);
   const meta = loadMetadata();
+  if (!meta) {
+    log("[verify-images] WARN: metadata-file thiếu — bỏ qua digest comparison, chỉ kiểm tra image existence.");
+  }
   const rows = [];
   const failures = [];
 
   for (const [target, tag] of Object.entries(EXPECTED)) {
     const info = inspect(tag);
-    const metaDigest = digestFromMeta(meta?.[target]);
+    const metaDigest = meta ? digestFromMeta(meta?.[target]) : "";
     if (!info) {
       failures.push(`target=${target} tag=${tag}: KHÔNG có image local (Compose sẽ không dùng được image vừa build).`);
       rows.push({ target, tag, id: "(missing)", digest: metaDigest || "(n/a)", ok: false });
