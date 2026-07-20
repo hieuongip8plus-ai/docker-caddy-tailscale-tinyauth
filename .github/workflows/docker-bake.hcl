@@ -15,11 +15,6 @@ function "labels" {
   }
 }
 
-function "cache_ref" {
-  params = [name]
-  result = ["type=gha,scope=${name}", "type=registry,ref=${REGISTRY_CACHE}/${name}:buildcache"]
-}
-
 group "default" {
   targets = ["webssh", "rclone", "orchestrator", "nodesync"]
 }
@@ -29,7 +24,7 @@ target "webssh" {
   dockerfile = "Dockerfile"
   tags       = ["proxy-stack-webssh:latest"]
   labels     = labels("webssh")
-  cache-from = cache_ref("webssh")
+  cache-from = ["type=gha,scope=webssh", "type=registry,ref=${REGISTRY_CACHE}/webssh:buildcache"]
   cache-to   = ["type=gha,mode=max,scope=webssh"]
 }
 
@@ -38,7 +33,7 @@ target "rclone" {
   dockerfile = "Dockerfile"
   tags       = ["proxy-stack-rclone:local"]
   labels     = labels("rclone")
-  cache-from = cache_ref("rclone")
+  cache-from = ["type=gha,scope=rclone", "type=registry,ref=${REGISTRY_CACHE}/rclone:buildcache"]
   cache-to   = ["type=gha,mode=max,scope=rclone"]
 }
 
@@ -47,7 +42,7 @@ target "orchestrator" {
   dockerfile = "Dockerfile"
   tags       = ["proxy-stack-orchestrator:local"]
   labels     = labels("orchestrator")
-  cache-from = cache_ref("orchestrator")
+  cache-from = ["type=gha,scope=orchestrator", "type=registry,ref=${REGISTRY_CACHE}/orchestrator:buildcache"]
   cache-to   = ["type=gha,mode=max,scope=orchestrator"]
 }
 
@@ -56,6 +51,6 @@ target "nodesync" {
   dockerfile = "Dockerfile"
   tags       = ["proxy-stack-nodesync:local"]
   labels     = labels("nodesync")
-  cache-from = cache_ref("nodesync")
+  cache-from = ["type=gha,scope=nodesync", "type=registry,ref=${REGISTRY_CACHE}/nodesync:buildcache"]
   cache-to   = ["type=gha,mode=max,scope=nodesync"]
 }
