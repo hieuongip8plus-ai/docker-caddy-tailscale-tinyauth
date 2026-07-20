@@ -209,32 +209,30 @@ async function applyServices(services, cfg, env) {
     // Step 1a: Clear existing services first (fix "needs configuration" stale state)
     log(`[services] Clearing existing services trước khi tạo mới...`);
     await Promise.all(cmds.map(async (cmd) => {
-      const svcPath = cmd.service.replace(/^svc:/, "");
-      if (DRY_RUN) { log(`[services] [DRY RUN] DELETE /${apiPath}/${svcPath}`); return; }
-      const r = await tsApi("DELETE", `/tailnet/${encodedTailnet}/${apiPath}/${svcPath}`, token);
-      if (r.ok) log(`[services] svc:${svcPath} cleared ✓`);
+      if (DRY_RUN) { log(`[services] [DRY RUN] DELETE /${apiPath}/${cmd.service}`); return; }
+      const r = await tsApi("DELETE", `/tailnet/${encodedTailnet}/${apiPath}/${cmd.service}`, token);
+      if (r.ok) log(`[services] ${cmd.service} cleared ✓`);
       // Ignore 404 (service doesn't exist yet)
     }));
 
     // Step 1b: Create services (sequential to avoid race conditions)
     for (const cmd of cmds) {
-      const svcPath = cmd.service.replace(/^svc:/, "");
-      if (DRY_RUN) { log(`[services] [DRY RUN] PUT /${apiPath}/${svcPath}`); continue; }
+      if (DRY_RUN) { log(`[services] [DRY RUN] PUT /${apiPath}/${cmd.service}`); continue; }
 
       let body;
       if (useServicesApi) {
         body = buildServicesBody(cmd.service);
       } else {
         if (addrs.length < 2) {
-          warn(`[services] svc:${svcPath} skipped: không lấy được IPv4+IPv6 từ tailscale status (got ${addrs.length} addrs). Dùng TS_SERVICES_VIP_MODE=services nếu API mới hỗ trợ không cần addrs.`);
+          warn(`[services] ${cmd.service} skipped: không lấy được IPv4+IPv6 từ tailscale status (got ${addrs.length} addrs). Dùng TS_SERVICES_VIP_MODE=services nếu API mới hỗ trợ không cần addrs.`);
           continue;
         }
         body = buildVipServiceBody(cmd.service, addrs);
       }
 
-      const r = await tsApi("PUT", `/tailnet/${encodedTailnet}/${apiPath}/${svcPath}`, token, body);
-      if (r.ok) log(`[services] svc:${svcPath} created ✓ (VIP: ${r.json.addrs?.[0] || r.json.name || "?"})`);
-      else warn(`[services] svc:${svcPath} create failed: HTTP ${r.status} ${r.json.message || ""}`);
+      const r = await tsApi("PUT", `/tailnet/${encodedTailnet}/${apiPath}/${cmd.service}`, token, body);
+      if (r.ok) log(`[services] ${cmd.service} created ✓ (VIP: ${r.json.addrs?.[0] || r.json.name || "?"})`);
+      else warn(`[services] ${cmd.service} create failed: HTTP ${r.status} ${r.json.message || ""}`);
     }
   } else {
     warn("[services] Không có OAuth token — bỏ qua VIP service creation (cần chạy ts-init trước).");
