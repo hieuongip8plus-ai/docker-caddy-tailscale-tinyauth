@@ -1,6 +1,6 @@
 FROM tsl0922/ttyd:alpine
 
-RUN apk add --no-cache bash git openssh-client tmux
+RUN --mount=type=cache,target=/var/cache/apk apk add bash git openssh-client tmux
 
 WORKDIR /workspace
 

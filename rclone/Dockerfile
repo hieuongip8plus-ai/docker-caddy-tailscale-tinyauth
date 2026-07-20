@@ -1,9 +1,9 @@
 FROM node:22-alpine
 
-RUN apk add --no-cache rclone
+RUN --mount=type=cache,target=/var/cache/apk apk add rclone
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY scripts/lib ./scripts/lib
 COPY rclone/scripts ./rclone/scripts

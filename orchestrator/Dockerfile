@@ -13,20 +13,19 @@
 FROM node:24-alpine3.23
 
 # docker-cli + compose plugin: cần để sidecar gọi `docker compose ...` qua socket
-RUN apk add --no-cache \
+RUN --mount=type=cache,target=/var/cache/apk apk add \
       docker-cli \
       docker-cli-compose \
       curl \
       bash \
-      tini \
-    && rm -rf /var/cache/apk/*
+      tini
 
 WORKDIR /app
 
 # Cài deps trước để tận dụng layer cache
 COPY orchestrator/package.json ./package.json
 COPY orchestrator/package-lock.json ./package-lock.json
-RUN npm ci --omit=dev --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --no-audit --no-fund
 
 # Copy toàn bộ code sidecar
 COPY orchestrator/ ./

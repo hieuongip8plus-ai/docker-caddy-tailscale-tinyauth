@@ -1,0 +1,32 @@
+# CI runtime/data
+ci-runtime/
+ci-data/
+
+# Node modules
+node_modules/
+*/node_modules/
+
+# Git
+.git/
+.github/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs
+*.md
+docs/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Test files
+**/*.test.js
+**/*.spec.js

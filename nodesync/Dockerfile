@@ -20,7 +20,7 @@ FROM node:24-alpine3.23
 
 COPY --from=cloudflared /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 
-RUN apk add --no-cache \
+RUN --mount=type=cache,target=/var/cache/apk apk add \
       openssh-client-default \
       netcat-openbsd \
       rsync \
@@ -30,8 +30,7 @@ RUN apk add --no-cache \
       findutils \
       curl \
       tini \
-    && cloudflared --version \
-    && rm -rf /var/cache/apk/*
+    && cloudflared --version
 
 # Tailscale chạy ở sidecar riêng. Nodesync chuyển mọi tailnet connection qua
 # SOCKS5 `localhost:1055` khi dùng chung network namespace với tailscale; không
@@ -42,7 +41,7 @@ WORKDIR /app
 # Cài deps trước (layer cache).
 COPY nodesync/package.json ./package.json
 COPY nodesync/package-lock.json ./package-lock.json
-RUN npm ci --omit=dev --no-audit --no-fund || npm install --omit=dev --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --no-audit --no-fund || npm install --omit=dev --no-audit --no-fund
 
 # Copy code sidecar.
 COPY nodesync/ ./
