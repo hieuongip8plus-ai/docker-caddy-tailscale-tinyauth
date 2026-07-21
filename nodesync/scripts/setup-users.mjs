@@ -33,7 +33,9 @@ function ensureUser(u) {
     log(`user already exists, skip create user=${u.user}`);
     return;
   }
-  const a = ["--no-log-init", "-m", "-s", u.shell];
+  // -k /dev/null: bỏ qua copy /etc/skel (bloat ~700MB trên GHA runners do
+  // Rust/.NET/Node/Haskell toolchains). Home dir vẫn được tạo, chỉ không copy skel.
+  const a = ["--no-log-init", "-m", "-k", "/dev/null", "-s", u.shell];
   if (u.uid) a.push("-u", String(u.uid));
   a.push(u.user);
   const r = privileged("useradd", a, { timeout: 60000 });
