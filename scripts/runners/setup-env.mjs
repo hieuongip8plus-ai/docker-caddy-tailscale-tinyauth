@@ -93,6 +93,8 @@ if (DRY_RUN) {
   appendEnv("MODE", "quick");
   log("secrets.ENV_FILE not set — using .env.ci + quick tunnel");
 }
+const envSource = DOTENVRTDB_URL ? "DOTENVRTDB_URL" : (ENV_FILE ? "ENV_FILE" : ".env.ci");
+log(`ENV source: ${envSource}`);
 showEnvKeys();
 
 // 2. Ensure required Tinyauth vars for quick mode
