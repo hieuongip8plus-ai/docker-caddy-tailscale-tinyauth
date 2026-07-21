@@ -74,12 +74,12 @@ jobs:
 
       - name: P1 Install dependencies and tools
         run: |
-          echo "P1 start $(date -u +%FT%T.%3NZ)"
+          date -u '+P1 start %FT%T.%3NZ'
           npm ci --loglevel=error
           npm ci --prefix nodesync --omit=dev --loglevel=error
           npm ci --prefix orchestrator --omit=dev --loglevel=error
           node scripts/runner-tools/install-tool.mjs --all
-          echo "P1 end $(date -u +%FT%T.%3NZ)"
+          date -u '+P1 end %FT%T.%3NZ'
 
       # Save right after install so later smoke failures still warm the cache.
       - name: Save runner tools cache
@@ -96,7 +96,7 @@ jobs:
         env:
           GIT_SHA: ${{ github.sha }}
         run: |
-          echo "P2 bake start $(date -u +%FT%T.%3NZ)"
+          date -u '+P2 bake start %FT%T.%3NZ'
           mkdir -p ci-runtime
           docker buildx bake \
             --file .github/workflows/docker-bake.hcl \
@@ -104,7 +104,7 @@ jobs:
             --metadata-file ci-runtime/bake-metadata.json \
             --load \
             default
-          echo "P2 bake end $(date -u +%FT%T.%3NZ)"
+          date -u '+P2 bake end %FT%T.%3NZ'
           echo "--- images after bake ---"
           docker image ls --format "{{.Repository}}:{{.Tag}} ({{.ID}})" | grep -i proxy-stack || echo "NO proxy-stack images found!"
 
@@ -116,22 +116,23 @@ jobs:
       - name: P3 Setup environment
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
+          DOTENVRTDB_URL: ${{ secrets.DOTENVRTDB_URL }}
         run: |
-          echo "P3 start $(date -u +%FT%T.%3NZ)"
+          date -u '+P3 start %FT%T.%3NZ'
           node scripts/runners/setup-env.mjs
-          echo "P3 end $(date -u +%FT%T.%3NZ)"
+          date -u '+P3 end %FT%T.%3NZ'
 
       - name: P4 Setup Host
         run: |
-          echo "P4 start $(date -u +%FT%T.%3NZ)"
+          date -u '+P4 start %FT%T.%3NZ'
           node scripts/runners/setup-host.mjs
-          echo "P4 end $(date -u +%FT%T.%3NZ)"
+          date -u '+P4 end %FT%T.%3NZ'
 
       - name: P5 Start stack
         run: |
-          echo "P5 start $(date -u +%FT%T.%3NZ)"
+          date -u '+P5 start %FT%T.%3NZ'
           node scripts/runners/start-stack.mjs
-          echo "P5 end $(date -u +%FT%T.%3NZ)"
+          date -u '+P5 end %FT%T.%3NZ'
 
       - name: P6 Verify stack
         env:
