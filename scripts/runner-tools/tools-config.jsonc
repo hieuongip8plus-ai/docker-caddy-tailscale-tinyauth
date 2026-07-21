@@ -70,7 +70,7 @@
     },
     {
       "name": "dotenvrtdb",
-      "verify": "dotenvrtdb --version",
+      "verify": "command -v dotenvrtdb",
       "methods": [
         {
           "id": "npm",
