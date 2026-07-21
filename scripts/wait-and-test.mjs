@@ -12,7 +12,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 process.chdir(ROOT);
 
-const docker = detectDocker();
+const args = process.argv.slice(2);
+const DRY_RUN = args.includes("--dry-run");
+const SILENT = args.includes("--silent");
+
+const log = (...a) => {
+  if (!SILENT) console.log(...a);
+};
+
+const docker = DRY_RUN ? { available: true, cmd: "docker", via: "dry-run" } : detectDocker();
 if (!docker.available) {
   console.error("ERROR: Docker not found.");
   process.exit(1);
@@ -21,10 +29,10 @@ if (!docker.available) {
 const ENV = resolve(ROOT, ".env");
 
 const TIMEOUT = parseInt(process.env.TEST_TIMEOUT || "180", 10);
-const INTERVAL = 5;
 const ACCEPT_RE = /^(200|301|302|307|401|403)$/;
 
 function sh(cmd) {
+  if (DRY_RUN) return "";
   try {
     return execSync(cmd, { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] })
       .toString()
@@ -35,10 +43,11 @@ function sh(cmd) {
 }
 
 // HTTP probe bằng fetch native (Node 18+), không phụ thuộc binary curl.
-// Giữ hành vi cũ: no redirect follow, timeout 20s, lưu body ra /tmp để in sau.
-async function httpCode(url) {
+// Giữ hành vi cũ: no redirect follow, timeout 10s mặc định, lưu body ra /tmp để in sau.
+async function httpCode(url, timeoutMs = 10000) {
+  if (DRY_RUN) return "200";
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 20000);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, { redirect: "manual", signal: ctrl.signal });
     let body = "";
@@ -60,17 +69,24 @@ async function httpCode(url) {
   }
 }
 
+if (DRY_RUN) {
+  log("[DRY RUN] Would wait for caddy, whoami, cloudflared");
+  log("[DRY RUN] Would probe local Caddy on 8080/80");
+  log("[DRY RUN] Would extract public URL and verify external access");
+  process.exit(0);
+}
+
 // ── Wait for core containers ─────────────────────────────────────
-console.log("==> Waiting for core containers...");
+log("==> Waiting for core containers...");
 const start = Date.now();
 const deadline = start + TIMEOUT * 1000;
 while (Date.now() < deadline) {
   const running = sh(dockerCmd("compose ps --status running --services"));
   if (["caddy", "whoami", "cloudflared"].every((s) => running.split("\n").includes(s))) {
-    console.log("    caddy, whoami, cloudflared are running");
+    log("    caddy, whoami, cloudflared are running");
     break;
   }
-  execSync(`sleep ${INTERVAL}`, { stdio: "ignore" });
+  execSync("sleep 1", { stdio: "ignore" });
 }
 
 const running = sh(dockerCmd("compose ps --status running --services"));
@@ -90,22 +106,23 @@ if (missing.length > 0) {
 }
 
 // ── Probe local Caddy ────────────────────────────────────────────
-console.log("==> Probing local Caddy (host port)...");
+log("==> Probing local Caddy (host port)...");
 let localOk = false;
-for (const port of [8080, 80]) {
-  for (let i = 0; i < 24; i++) {
-    const code = await httpCode(`http://127.0.0.1:${port}/`);
+for (let i = 0; i < 24; i++) {
+  for (const port of [8080, 80]) {
+    const code = await httpCode(`http://127.0.0.1:${port}/`, 3000);
     if (ACCEPT_RE.test(code)) {
-      console.log(`    localhost:${port} → HTTP ${code}`);
+      log(`    localhost:${port} → HTTP ${code}`);
       localOk = true;
       break;
     }
-    execSync("sleep 2", { stdio: "ignore" });
   }
   if (localOk) break;
+  execSync("sleep 1", { stdio: "ignore" });
 }
+
 if (!localOk) {
-  console.log("WARN: local Caddy not ready on :8080/:80 (continuing with public tunnel check)");
+  log("WARN: local Caddy not ready on :8080/:80 (continuing with public tunnel check)");
   try {
     execSync(dockerCmd("compose logs --no-color --tail=60 caddy"), { stdio: "inherit", cwd: ROOT });
   } catch {}
@@ -131,17 +148,17 @@ if (!publicUrl) {
     } else if (domain) {
       publicUrl = `https://whoami.${domain}`;
     }
-    console.log(`==> Named tunnel mode → testing ${publicUrl || "(unset)"}`);
+    log(`==> Named tunnel mode → testing ${publicUrl || "(unset)"}`);
   }
 }
 
 if (!publicUrl) {
-  console.log("==> Extracting Cloudflare quick-tunnel URL...");
+  log("==> Extracting Cloudflare quick-tunnel URL...");
   const cfExtract = resolve(ROOT, "cloudflare/scripts/extract-tunnel-url.mjs");
   if (existsSync(cfExtract)) {
     const extractTimeout = Math.min(TIMEOUT, 120);
     try {
-      publicUrl = execSync(`node "${cfExtract}" ${extractTimeout} ${INTERVAL}`, {
+      publicUrl = execSync(`node "${cfExtract}" ${extractTimeout} 1`, {
         cwd: ROOT,
         stdio: ["pipe", "pipe", "pipe"],
         timeout: (extractTimeout + 10) * 1000,
@@ -173,24 +190,24 @@ if (!publicUrl) {
 }
 
 // ── Verify external HTTP access ──────────────────────────────────
-console.log(`==> Public URL: ${publicUrl}`);
-console.log("==> Verifying external HTTP access (no redirect follow)...");
+log(`==> Public URL: ${publicUrl}`);
+log("==> Verifying external HTTP access (no redirect follow)...");
 
 let extOk = false;
 let lastCode = "000";
 for (let i = 1; i <= 36; i++) {
-  lastCode = await httpCode(`${publicUrl}/`);
-  console.log(`    attempt ${i}: HTTP ${lastCode}`);
+  lastCode = await httpCode(`${publicUrl}/`, 10000);
+  log(`    attempt ${i}: HTTP ${lastCode}`);
   if (ACCEPT_RE.test(lastCode)) {
     extOk = true;
     break;
   }
 
   // Debug probe at attempts 6 and 18: kiem tra origin http://caddy:80 TU TRONG
-  // network proxy. Dung \`compose exec cloudflared\` (container da o san trong
+  // network proxy. Dung `compose exec cloudflared` (container da o san trong
   // network proxy) chay wget — khong can pull image curl tu ngoai.
   if (i === 6 || i === 18) {
-    console.log("    (debug) probe http://caddy:80 from proxy network:");
+    log("    (debug) probe http://caddy:80 from proxy network:");
     try {
       const out = execSync(dockerCmd("compose exec -T cloudflared wget -q -S -O /dev/null http://caddy:80/"), {
         cwd: ROOT,
@@ -198,15 +215,15 @@ for (let i = 1; i <= 36; i++) {
         timeout: 15000,
       }).toString();
       const m = out.match(/HTTP\/\S+\s+(\d{3})/);
-      console.log(`    (debug) caddy_origin HTTP ${m ? m[1] : "unknown"}`);
+      log(`    (debug) caddy_origin HTTP ${m ? m[1] : "unknown"}`);
     } catch (e) {
-      const err = ((e && e.stderr) || "").toString();
-      const m = err.match(/HTTP\/\S+\s+(\d{3})/);
-      if (m) console.log(`    (debug) caddy_origin HTTP ${m[1]}`);
-      else console.log("    (debug) origin probe failed");
+      const errStr = ((e && e.stderr) || "").toString();
+      const m = errStr.match(/HTTP\/\S+\s+(\d{3})/);
+      if (m) log(`    (debug) caddy_origin HTTP ${m[1]}`);
+      else log("    (debug) origin probe failed");
     }
   }
-  execSync("sleep 5", { stdio: "ignore" });
+  execSync("sleep 2", { stdio: "ignore" });
 }
 
 if (!extOk) {
@@ -226,15 +243,15 @@ if (!extOk) {
   process.exit(1);
 }
 
-console.log("");
-console.log("SUCCESS: stack is reachable from the outside");
-console.log(`  URL:  ${publicUrl}`);
-console.log(`  HTTP: ${lastCode}`);
+log("");
+log("SUCCESS: stack is reachable from the outside");
+log(`  URL:  ${publicUrl}`);
+log(`  HTTP: ${lastCode}`);
 
 if (existsSync("/tmp/proxy-stack-body.txt")) {
   const body = readFileSync("/tmp/proxy-stack-body.txt", "utf8").split("\n").slice(0, 20).join("\n");
-  console.log("  Body (first 20 lines):");
-  console.log(body);
+  log("  Body (first 20 lines):");
+  log(body);
 }
 
 writeFileSync("/tmp/proxy-stack-public-url.txt", publicUrl);
