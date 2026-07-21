@@ -48,11 +48,36 @@ function envAppend(line) {
   appendFileSync(ENV, line + "\n");
 }
 
-// 1. Write .env
+// 1. Write .env — three sources, checked in priority order:
+//    a) DOTENVRTDB_URL  → dotenvrtdb pull from Firebase RTDB
+//    b) ENV_FILE         → GitHub secret / inline blob
+//    c) fallback         → .env.ci (quick tunnel)
+const DOTENVRTDB_URL = process.env.DOTENVRTDB_URL || "";
 if (DRY_RUN) {
-  const dryEnv = ENV_FILE ? dotenv.parse(ENV_FILE) : {};
-  log(`[DRY RUN] Would write .env from: ${ENV_FILE ? "secrets.ENV_FILE" : ".env.ci"}`);
+  const dryEnv = DOTENVRTDB_URL ? {} : (ENV_FILE ? dotenv.parse(ENV_FILE) : {});
+  const src = DOTENVRTDB_URL ? "dotenvrtdb RTDB" : (ENV_FILE ? "secrets.ENV_FILE" : ".env.ci");
+  log(`[DRY RUN] Would write .env from: ${src}`);
   log(`[DRY RUN] Mode: ${dryEnv.CF_TUNNEL_TOKEN ? "named" : "quick"}`);
+} else if (DOTENVRTDB_URL) {
+  log("DOTENVRTDB_URL detected — pulling .env via dotenvrtdb …");
+  try {
+    execSync(`dotenvrtdb -e .env --pull -eUrl="${DOTENVRTDB_URL}"`, {
+      cwd: ROOT,
+      stdio: "inherit",
+      timeout: 60_000,
+    });
+    log("dotenvrtdb pull complete — .env written");
+  } catch (e) {
+    console.error(`dotenvrtdb pull failed (code=${e.status ?? e.message})`);
+    process.exit(1);
+  }
+  if (envGet(ENV, "CF_TUNNEL_TOKEN")) {
+    appendEnv("MODE", "named");
+    log("Named Cloudflare tunnel mode (CF_TUNNEL_TOKEN set)");
+  } else {
+    appendEnv("MODE", "quick");
+    log("Quick tunnel mode (no CF_TUNNEL_TOKEN in pulled .env)");
+  }
 } else if (ENV_FILE) {
   writeFileSync(ENV, ENV_FILE + "\n");
   log("Wrote .env from secrets.ENV_FILE");

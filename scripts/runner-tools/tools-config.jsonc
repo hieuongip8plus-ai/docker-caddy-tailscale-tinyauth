@@ -67,6 +67,17 @@
           "run": "brew install litestream"
         }
       ]
+    },
+    {
+      "name": "dotenvrtdb",
+      "verify": "dotenvrtdb --version",
+      "methods": [
+        {
+          "id": "npm",
+          "needs": "npm",
+          "run": "npm install -g @tltdh61/dotenvrtdb"
+        }
+      ]
     }
   ]
 }
