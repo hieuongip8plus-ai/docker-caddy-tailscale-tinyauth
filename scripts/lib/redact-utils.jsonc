@@ -1,0 +1,39 @@
+{
+  // redact-utils.jsonc — configurable secret-redaction rules for CI log collection.
+  //
+  // env_keywords: rules for matching environment variable KEY names.
+  //   Each rule: { "pattern": "STRING", "mode": MODE }
+  //   MODE:
+  //     "contains"    — key name contains pattern (case-insensitive, default)
+  //     "starts_with" — key name starts with pattern
+  //     "ends_with"   — key name ends with pattern
+  //     "exact"       — key name equals pattern exactly
+  //   A key is redacted if ANY rule matches.
+  //
+  // field_patterns: rules for YAML/JSON field names (e.g. access-key-id in S3 config).
+  //   Same structure as env_keywords but matched against field names in YAML/JSON text.
+
+  "env_keywords": [
+    // ── Secrets / tokens (contains) ──
+    { "pattern": "TOKEN",           "mode": "contains" },
+    { "pattern": "SECRET",          "mode": "contains" },
+    { "pattern": "PASSWORD",        "mode": "contains" },
+    { "pattern": "PASS",            "mode": "contains" },
+    { "pattern": "AUTH",            "mode": "contains" },
+    { "pattern": "KEY",             "mode": "contains" },
+    { "pattern": "COOKIE",          "mode": "contains" },
+    { "pattern": "CREDENTIAL",      "mode": "contains" },
+    { "pattern": "CLIENT_ID",       "mode": "contains" },
+    { "pattern": "CLIENT_SECRET",   "mode": "contains" },
+    { "pattern": "USERS",           "mode": "contains" },
+
+    // ── Service accounts (contains) ──
+    { "pattern": "SERVICE_ACCOUNT", "mode": "contains" },
+    { "pattern": "ACCOUNT_ID",      "mode": "contains" },
+  ],
+
+  "field_patterns": [
+    { "pattern": "access-key-id",    "mode": "contains" },
+    { "pattern": "secret-access-key", "mode": "contains" },
+  ],
+}
