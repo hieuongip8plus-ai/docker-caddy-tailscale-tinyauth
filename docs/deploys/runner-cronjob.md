@@ -84,7 +84,7 @@ flowchart TD
 | `CRONJOB_NEXT_RUN_MINUTES` | input/vars, default `58` | số phút dự kiến của 1 workflow |
 | `GITHUB_TOKEN` | `${{ github.token }}` | token self-dispatch trên GitHub |
 | `CRONJOB_RUN_GROUP` | input hoặc workflow/ref default | concurrency group truyền sang run kế tiếp |
-| `CRONJOB_DISPATCH_PAT` | secret | PAT cho channel ngoài gọi GitHub |
+| `CRONJOB_DISPATCH_PAT` | secret | PAT cho channel ngoài gọi GitHub. Fallback: `GITHUB_TOKEN` → Azure `System.AccessToken` → `AZURE_DEVOPS_PAT` |
 | `CRONJOB_*_ENABLE` | vars, optional | bật/tắt từng channel ngoài |
 | token/API key từng channel | secrets | xác thực với dịch vụ ngoài |
 | lịch từng channel | vars | lịch từng channel |

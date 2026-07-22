@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { parseEnv } from "../lib/env-utils.mjs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,8 +27,9 @@ const log = (...a) => {
   rows.push(msg);
   if (!SILENT) console.log(msg);
 };
+const fileEnv = parseEnv(resolve(ROOT, ".env"));
 const env = (key, fallback = "") => {
-  const value = process.env[key];
+  const value = fileEnv[key] || process.env[key];
   if (!value || /^\$\([^)]+\)$/.test(value)) return fallback;
   return value;
 };
@@ -41,6 +43,10 @@ const channelConfigured = (enableKey, requiredKeys) => {
   if (bool(raw)) return true;
   return requiredKeys.some((key) => Boolean(env(key)));
 };
+
+function resolveDispatchPat() {
+  return env("CRONJOB_DISPATCH_PAT") || env("GITHUB_TOKEN") || env("SYSTEM_ACCESSTOKEN") || env("AZURE_DEVOPS_PAT") || "";
+}
 
 function config() {
   const defaults = {
@@ -69,7 +75,7 @@ function nextRunPlan() {
   const start = currentRunStartedAt();
   const dispatchAt = new Date(start.getTime() + minutes * 60_000);
   const now = new Date();
-  const enabledRaw = process.env.CRONJOB_NEXT_RUN_ENABLE ?? process.env.CRONJON_NEXT_RUN_ENABLE;
+  const enabledRaw = env("CRONJOB_NEXT_RUN_ENABLE", env("CRONJON_NEXT_RUN_ENABLE"));
   return { enabled: boolDefaultTrue(enabledRaw), minutes, start, dispatchAt, now, allowed: now >= dispatchAt };
 }
 
@@ -98,7 +104,7 @@ async function githubJson(name, url, token, body) {
 }
 
 function dispatchBody(ctx) {
-  const enabledRaw = process.env.CRONJOB_NEXT_RUN_ENABLE ?? process.env.CRONJON_NEXT_RUN_ENABLE;
+  const enabledRaw = env("CRONJOB_NEXT_RUN_ENABLE", env("CRONJON_NEXT_RUN_ENABLE"));
   return {
     ref: env("CRONJOB_REF", ctx.ref),
     inputs: {
@@ -117,14 +123,14 @@ function githubUrl(ctx) {
 }
 
 async function selfDispatch(ctx) {
-  const token = env("CRONJOB_GITHUB_TOKEN", process.env.GITHUB_TOKEN);
-  if (!token) throw new Error("Missing CRONJOB_GITHUB_TOKEN or GITHUB_TOKEN.");
+  const token = env("CRONJOB_GITHUB_TOKEN") || env("CRONJOB_DISPATCH_PAT") || env("GITHUB_TOKEN") || env("SYSTEM_ACCESSTOKEN") || env("AZURE_DEVOPS_PAT") || "";
+  if (!token) throw new Error("Missing CRONJOB_GITHUB_TOKEN / CRONJOB_DISPATCH_PAT / GITHUB_TOKEN / Azure System.AccessToken.");
   return githubJson("github:dispatch", githubUrl(ctx), token, dispatchBody(ctx));
 }
 
 function dispatchHeaders() {
-  const pat = env("CRONJOB_DISPATCH_PAT");
-  if (!pat) throw new Error("External cron channels need CRONJOB_DISPATCH_PAT.");
+  const pat = resolveDispatchPat();
+  if (!pat) throw new Error("External cron channels need CRONJOB_DISPATCH_PAT (or GITHUB_TOKEN / Azure System.AccessToken).");
   return [
     `Authorization: Bearer ${pat}`,
     "Accept: application/vnd.github+json",
@@ -136,8 +142,8 @@ function dispatchHeaders() {
 async function ensureCronJobOrg(ctx) {
   if (!channelConfigured("CRONJOB_CRONJOBORG_ENABLE", ["CRONJOB_CRONJOBORG_API_KEY"])) return null;
   const apiKey = env("CRONJOB_CRONJOBORG_API_KEY");
-  const pat = env("CRONJOB_DISPATCH_PAT");
-  if (!apiKey || !pat) throw new Error("cron-job.org needs CRONJOB_CRONJOBORG_API_KEY and CRONJOB_DISPATCH_PAT.");
+  const pat = resolveDispatchPat();
+  if (!apiKey || !pat) throw new Error("cron-job.org needs CRONJOB_CRONJOBORG_API_KEY and a dispatch PAT (CRONJOB_DISPATCH_PAT / GITHUB_TOKEN / Azure System.AccessToken).");
   const body = {
     job: {
       title: env("CRONJOB_JOB_TITLE", "proxy-stack-keepalive"),
@@ -204,8 +210,8 @@ async function ensureFastCron(ctx) {
 async function ensureQstash(ctx) {
   if (!channelConfigured("CRONJOB_QSTASH_ENABLE", ["CRONJOB_QSTASH_TOKEN"])) return null;
   const token = env("CRONJOB_QSTASH_TOKEN");
-  const pat = env("CRONJOB_DISPATCH_PAT");
-  if (!token || !pat) throw new Error("QStash needs CRONJOB_QSTASH_TOKEN and CRONJOB_DISPATCH_PAT.");
+  const pat = resolveDispatchPat();
+  if (!token || !pat) throw new Error("QStash needs CRONJOB_QSTASH_TOKEN and a dispatch PAT (CRONJOB_DISPATCH_PAT / GITHUB_TOKEN / Azure System.AccessToken).");
   const destination = encodeURIComponent(githubUrl(ctx));
   return httpJson("qstash:schedule", `${env("CRONJOB_QSTASH_API", "https://qstash.upstash.io")}/v2/schedules/${destination}`, {
     headers: {
@@ -256,7 +262,7 @@ function markStart() {
   const value = new Date().toISOString();
   const minutes = num(env("CRONJOB_NEXT_RUN_MINUTES", env("CRONJON_NEXT_RUN_MINUTES")), config().next_run_minutes);
   const dispatchAllowedAt = new Date(new Date(value).getTime() + minutes * 60_000).toISOString();
-  const enabledRaw = process.env.CRONJOB_NEXT_RUN_ENABLE ?? process.env.CRONJON_NEXT_RUN_ENABLE;
+  const enabledRaw = env("CRONJOB_NEXT_RUN_ENABLE", env("CRONJON_NEXT_RUN_ENABLE"));
   const report = {
     action: "mark-start",
     dryRun: DRY_RUN,
