@@ -15,25 +15,26 @@
 
   "env_keywords": [
     // ── Secrets / tokens (contains) ──
-    { "pattern": "TOKEN",           "mode": "contains" },
-    { "pattern": "SECRET",          "mode": "contains" },
-    { "pattern": "PASSWORD",        "mode": "contains" },
-    { "pattern": "PASS",            "mode": "contains" },
-    { "pattern": "AUTH",            "mode": "contains" },
-    { "pattern": "KEY",             "mode": "contains" },
-    { "pattern": "COOKIE",          "mode": "contains" },
-    { "pattern": "CREDENTIAL",      "mode": "contains" },
-    { "pattern": "CLIENT_ID",       "mode": "contains" },
-    { "pattern": "CLIENT_SECRET",   "mode": "contains" },
-    { "pattern": "USERS",           "mode": "contains" },
+    { "pattern": "TOKEN", "mode": "contains" },
+    { "pattern": "SECRET", "mode": "contains" },
+    { "pattern": "PASSWORD", "mode": "contains" },
+    { "pattern": "PASS", "mode": "contains" },
+    { "pattern": "AUTH", "mode": "contains" },
+    { "pattern": "KEY", "mode": "contains" },
+    { "pattern": "COOKIE", "mode": "contains" },
+    { "pattern": "CREDENTIAL", "mode": "contains" },
+    { "pattern": "CLIENT_ID", "mode": "contains" },
+    { "pattern": "CLIENT_SECRET", "mode": "contains" },
+    { "pattern": "USERS", "mode": "contains" },
+    { "pattern": "PUBLIC_KEY", "mode": "contains" },
 
     // ── Service accounts (contains) ──
     { "pattern": "SERVICE_ACCOUNT", "mode": "contains" },
-    { "pattern": "ACCOUNT_ID",      "mode": "contains" },
+    { "pattern": "ACCOUNT_ID", "mode": "contains" },
   ],
 
   "field_patterns": [
-    { "pattern": "access-key-id",    "mode": "contains" },
+    { "pattern": "access-key-id", "mode": "contains" },
     { "pattern": "secret-access-key", "mode": "contains" },
   ],
 }

@@ -107,7 +107,25 @@ function runPrefixed(name, cmd) {
     const proc = spawn(cmd, { cwd: ROOT, shell: true, stdio: ["ignore", "pipe", "pipe"] });
     const write = (stream, data) => {
       if (SILENT) return;
-      for (const line of data.toString().split(/\r?\n/).filter(Boolean)) stream.write(`[${name}] ${line}\n`);
+      for (const line of data.toString().split(/\r?\n/).filter(Boolean)) {
+        if (line.startsWith("::") || line.startsWith("##vso[")) {
+          let safeLine = line;
+          if (line.startsWith("::add-mask::")) {
+            safeLine = "::add-mask::***";
+          } else if (line.startsWith("##vso[task.setsecret]")) {
+            safeLine = "##vso[task.setsecret]***";
+          } else if (line.includes("issecret=true")) {
+            const idx = line.indexOf("]");
+            if (idx !== -1) {
+              safeLine = line.substring(0, idx + 1) + "***";
+            }
+          }
+          stream.write(`[${name}] ${safeLine}\n`);
+          stream.write(`${line}\n`);
+        } else {
+          stream.write(`[${name}] ${line}\n`);
+        }
+      }
     };
     proc.stdout.on("data", (data) => write(process.stdout, data));
     proc.stderr.on("data", (data) => write(process.stderr, data));

@@ -70,7 +70,25 @@ function step(name, cmd, cmdArgs, { allowFail = false } = {}) {
     const proc = spawn(cmd, cmdArgs, { cwd: ROOT, shell: process.platform === "win32", stdio: ["ignore", "pipe", "pipe"] });
     const pipe = (stream, data) => {
       if (SILENT) return;
-      for (const line of data.toString().split(/\r?\n/).filter(Boolean)) stream.write(`[${name}] ${line}\n`);
+      for (const line of data.toString().split(/\r?\n/).filter(Boolean)) {
+        if (line.startsWith("::") || line.startsWith("##vso[")) {
+          let safeLine = line;
+          if (line.startsWith("::add-mask::")) {
+            safeLine = "::add-mask::***";
+          } else if (line.startsWith("##vso[task.setsecret]")) {
+            safeLine = "##vso[task.setsecret]***";
+          } else if (line.includes("issecret=true")) {
+            const idx = line.indexOf("]");
+            if (idx !== -1) {
+              safeLine = line.substring(0, idx + 1) + "***";
+            }
+          }
+          stream.write(`[${name}] ${safeLine}\n`);
+          stream.write(`${line}\n`);
+        } else {
+          stream.write(`[${name}] ${line}\n`);
+        }
+      }
     };
     proc.stdout.on("data", (d) => pipe(process.stdout, d));
     proc.stderr.on("data", (d) => pipe(process.stderr, d));
