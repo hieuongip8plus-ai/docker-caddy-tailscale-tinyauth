@@ -72,10 +72,27 @@ function ensureParts() {
   _fieldPart = cfg.field_patterns.map(fieldToRegexFragment).join("|");
 }
 
+function _redactLine(match, prefix, rawValue) {
+  const q = rawValue[0];
+  const inner = (q === '"' || q === "'") ? rawValue.slice(1, -1) : rawValue;
+  if (inner.length < 5) return match;
+  return prefix + "[REDACTED]";
+}
+
 export function redactSecrets(value) {
   ensureParts();
+  const envKey = `[A-Z0-9_]*(?:${_envPart})[A-Z0-9_]*`;
   return String(value)
-    .replace(new RegExp(`^(\\s*-?\\s*["']?[A-Z0-9_]*(?:${_envPart})[A-Z0-9_]*["']?\\s*[:=]\\s*).+$`, "gmi"), "$1[REDACTED]")
-    .replace(new RegExp(`("?[A-Z0-9_]*(?:${_envPart})[A-Z0-9_]*"?=)[^",\\]\\s]+`, "gi"), "$1[REDACTED]")
-    .replace(new RegExp(`((?:${_fieldPart}):\\s*).+`, "gi"), "$1[REDACTED]");
+    .replace(
+      new RegExp(`^(\\s*-?\\s*["']?${envKey}["']?\\s*[:=]\\s*)("[^"]*"|'[^']*'|[^\\s]+).*`, "gmi"),
+      _redactLine,
+    )
+    .replace(
+      new RegExp(`("?${envKey}"?=)("[^"]*"|'[^']*'|[^",\\[\\]\\s]+)`, "gi"),
+      _redactLine,
+    )
+    .replace(
+      new RegExp(`((?:${_fieldPart}):\\s*)("[^"]*"|'[^']*'|[^\\s]+).*`, "gi"),
+      _redactLine,
+    );
 }

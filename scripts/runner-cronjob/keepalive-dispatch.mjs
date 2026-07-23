@@ -456,6 +456,7 @@ log("[plan]", {
   now: plan.now.toISOString(),
   allowedNow: plan.allowed,
   dryRun: DRY_RUN,
+  dispatchBody: dispatchBody(ctx),
 });
 
 if (ctx.provider !== "github" && !env("CRONJOB_OWNER")) {
