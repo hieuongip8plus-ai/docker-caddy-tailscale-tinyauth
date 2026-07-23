@@ -220,6 +220,35 @@ function getDispatchRepositories(ctx) {
   return [{ index: 0, name, owner, workflow, ref, pat, hours }];
 }
 
+function getIndexedAzurePipelines(ctx) {
+  const list = [];
+  let i = 1;
+  while (true) {
+    const orgKey = `CRONJOB_AZURE_ORG_${i}`;
+    const org = env(orgKey);
+    if (!org) break;
+    const project = env(`CRONJOB_AZURE_PROJECT_${i}`, env("CRONJOB_AZURE_PROJECT", ctx.project || ""));
+    const pipelineId = env(`CRONJOB_AZURE_PIPELINE_ID_${i}`, env("CRONJOB_AZURE_PIPELINE_ID", ""));
+    const pat = env(`CRONJOB_AZURE_PAT_${i}`) || env("CRONJOB_DISPATCH_PAT_AZURE") || env("CRONJOB_DISPATCH_PAT") || env("SYSTEM_ACCESSTOKEN") || env("AZURE_DEVOPS_PAT") || "";
+    const hours = env(`CRONJOB_AZURE_HOURS_${i}`, env("CRONJOB_HOURS"));
+    list.push({ index: i, org, project, pipelineId, pat, hours });
+    i++;
+  }
+  return list;
+}
+
+function getAzurePipelines(ctx) {
+  const indexed = getIndexedAzurePipelines(ctx);
+  if (indexed.length > 0) return indexed;
+  const org = env("CRONJOB_AZURE_ORG") || (ctx.provider === "azure" ? ctx.owner : "") || "";
+  const project = env("CRONJOB_AZURE_PROJECT") || (ctx.provider === "azure" ? ctx.project : "") || "";
+  const pipelineId = env("CRONJOB_AZURE_PIPELINE_ID", "");
+  const pat = env("CRONJOB_DISPATCH_PAT_AZURE") || env("CRONJOB_DISPATCH_PAT") || env("SYSTEM_ACCESSTOKEN") || env("AZURE_DEVOPS_PAT") || "";
+  const hours = env("CRONJOB_HOURS");
+  if (!org || !project || !pipelineId) return [];
+  return [{ index: 0, org, project, pipelineId, pat, hours }];
+}
+
 function showCronjobEnv() {
   const allKeys = new Set([
     ...Object.keys(fileEnv),
@@ -269,50 +298,64 @@ async function azureJson(name, url, token, body) {
 }
 
 async function azureDispatch(ctx) {
+  const pipelines = getAzurePipelines(ctx);
   const tz = env("CRONJOB_TZ", "Asia/Bangkok");
   const formatter = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false });
   const localHour = Number(formatter.format(new Date())) % 24;
+  const dispatches = [];
 
-  const pat = env("CRONJOB_DISPATCH_PAT") || env("SYSTEM_ACCESSTOKEN") || env("AZURE_DEVOPS_PAT") || "";
-  if (!pat) {
-    return { ok: false, status: "error", error: "Missing Azure dispatch token (CRONJOB_DISPATCH_PAT / SYSTEM_ACCESSTOKEN / AZURE_DEVOPS_PAT)." };
+  if (pipelines.length === 0) {
+    return { ok: false, status: "error", text: "[]", error: "No Azure pipelines configured." };
   }
 
-  const org = env("CRONJOB_AZURE_ORG", ctx.owner || "");
-  const project = env("CRONJOB_AZURE_PROJECT", ctx.project || "");
-  const pipelineId = env("CRONJOB_AZURE_PIPELINE_ID", "");
-  const hours = env("CRONJOB_HOURS");
+  for (const p of pipelines) {
+    const label = p.index > 0 ? `pipeline #${p.index} (${p.org}/${p.project}/${p.pipelineId})` : `default (${p.org}/${p.project}/${p.pipelineId})`;
 
-  if (!org || !project || !pipelineId) {
-    return { ok: false, status: "error", error: "Missing CRONJOB_AZURE_ORG, CRONJOB_AZURE_PROJECT, or CRONJOB_AZURE_PIPELINE_ID." };
+    if (!p.pat) {
+      dispatches.push({ name: label, ok: false, status: "error", error: "Missing Azure dispatch token." });
+      log(`[azure:dispatch] ${label} failed: Missing dispatch token.`);
+      continue;
+    }
+
+    if (!p.org || !p.project || !p.pipelineId) {
+      dispatches.push({ name: label, ok: false, status: "error", error: "Missing org, project, or pipelineId." });
+      log(`[azure:dispatch] ${label} failed: Missing org/project/pipelineId.`);
+      continue;
+    }
+
+    const allowed = isHourAllowed(p.hours, localHour);
+    log(`[azure:dispatch] ${label} checking hours range [${p.hours || "any"}] vs current hour [${localHour}h]: ${allowed ? "ALLOWED" : "SKIPPED"}`);
+    if (!allowed) {
+      dispatches.push({ name: label, ok: null, status: "skipped", reason: `Hour ${localHour}h not in range ${p.hours}` });
+      continue;
+    }
+
+    const url = `${env("CRONJOB_AZURE_API", `https://dev.azure.com/${p.org}/${p.project}`)}/_apis/pipelines/${p.pipelineId}/runs?api-version=7.1`;
+    const body = {
+      resources: {},
+      variables: {
+        CRONJOB_NEXT_RUN_ENABLE: { value: String(boolDefaultTrue(env("CRONJOB_NEXT_RUN_ENABLE"))) },
+        CRONJOB_NEXT_RUN_MINUTES: { value: String(num(env("CRONJOB_NEXT_RUN_MINUTES"), config().next_run_minutes)) },
+        CRONJOB_RUN_GROUP: { value: env("CRONJOB_RUN_GROUP", ctx.runGroup) },
+      },
+    };
+
+    try {
+      const res = await azureJson(`azure:dispatch:${p.org}/${p.project}`, url, p.pat, body);
+      dispatches.push({ name: label, ok: res.ok, status: res.status, response: redact(res.text || "") });
+    } catch (e) {
+      log(`[azure:dispatch] ${label} error`, e.stack || e.message);
+      dispatches.push({ name: label, ok: false, status: "error", error: redact(e.message) });
+    }
   }
 
-  const allowed = isHourAllowed(hours, localHour);
-  log(`[azure:dispatch] checking hours range [${hours || "any"}] vs current hour [${localHour}h]: ${allowed ? "ALLOWED" : "SKIPPED"}`);
-  if (!allowed) {
-    return { ok: null, status: "skipped", reason: `Hour ${localHour}h not in range ${hours}` };
-  }
-
-  const url = `${env("CRONJOB_AZURE_API", `https://dev.azure.com/${org}/${project}`)}/_apis/pipelines/${pipelineId}/runs?api-version=7.1`;
-  const body = {
-    resources: {},
-    variables: {
-      CRONJOB_NEXT_RUN_ENABLE: { value: String(boolDefaultTrue(env("CRONJOB_NEXT_RUN_ENABLE"))) },
-      CRONJOB_NEXT_RUN_MINUTES: { value: String(num(env("CRONJOB_NEXT_RUN_MINUTES"), config().next_run_minutes)) },
-      CRONJOB_RUN_GROUP: { value: env("CRONJOB_RUN_GROUP", ctx.runGroup) },
-    },
-  };
-
-  try {
-    const res = await azureJson(`azure:dispatch:${org}/${project}`, url, pat, body);
-    return { ok: res.ok, status: res.status, response: redact(res.text || "") };
-  } catch (e) {
-    log(`[azure:dispatch] error`, e.stack || e.message);
-    return { ok: false, status: "error", error: redact(e.message) };
-  }
+  const failed = dispatches.filter((d) => d.ok === false).length;
+  const text = JSON.stringify(dispatches);
+  return { ok: failed === 0, status: failed > 0 ? "error" : "success", text };
 }
 
 async function selfDispatch(ctx) {
+  // Azure provider → only Azure dispatch (backward compat, avoids bad GitHub defaults)
   if (ctx.provider === "azure") {
     return azureDispatch(ctx);
   }
@@ -353,6 +396,22 @@ async function selfDispatch(ctx) {
       dispatches.push({ name: label, ok: false, status: "error", error: redact(e.message) });
     }
   }
+
+  // Azure pipelines on non-Azure provider (if explicitly configured)
+  const azurePipelines = getAzurePipelines(ctx);
+  if (azurePipelines.length > 0) {
+    log(`[self-dispatch] Azure pipelines configured, dispatching to ${azurePipelines.length} pipeline(s) on top of GitHub repos.`);
+    const azureResult = await azureDispatch(ctx);
+    if (azureResult.text) {
+      try {
+        const azureDispatches = JSON.parse(azureResult.text);
+        dispatches.push(...azureDispatches);
+      } catch {
+        dispatches.push({ name: "azure", ok: false, status: "error", error: "Failed to parse Azure dispatch results." });
+      }
+    }
+  }
+
   const failed = dispatches.filter((d) => d.ok === false).length;
   const text = JSON.stringify(dispatches);
   return { ok: failed === 0, status: failed > 0 ? "error" : "success", text };
@@ -367,6 +426,47 @@ function dispatchHeaders() {
     `X-GitHub-Api-Version: ${env("CRONJOB_GITHUB_API_VERSION", config().github_api_version)}`,
     "Content-Type: application/json",
   ];
+}
+
+/**
+ * Cấu hình target cho external cron channels (GitHub API hoặc Azure DevOps API).
+ * Detect dựa trên CRONJOB_AZURE_PIPELINE_ID: nếu có → Azure, không → GitHub.
+ * Trả về { url, authValue, body, headers, pat } để mỗi channel dùng.
+ * Auth: GitHub → Bearer, Azure → Basic base64(:PAT) — user chỉ cần set raw PAT.
+ */
+function externalTargetConfig(ctx) {
+  const azurePipelineId = env("CRONJOB_AZURE_PIPELINE_ID");
+  if (azurePipelineId) {
+    const org = env("CRONJOB_AZURE_ORG") || ctx.owner || "";
+    const project = env("CRONJOB_AZURE_PROJECT") || ctx.project || "";
+    const pat = env("CRONJOB_DISPATCH_PAT_AZURE") || env("CRONJOB_DISPATCH_PAT") || env("SYSTEM_ACCESSTOKEN") || env("AZURE_DEVOPS_PAT") || "";
+    const baseUrl = env("CRONJOB_AZURE_API", `https://dev.azure.com/${org}/${project}`);
+    const url = `${baseUrl}/_apis/pipelines/${azurePipelineId}/runs?api-version=7.1`;
+    const authValue = `Basic ${Buffer.from(`:${pat}`).toString("base64")}`;
+    const body = {
+      resources: {},
+      variables: {
+        CRONJOB_NEXT_RUN_ENABLE: { value: String(boolDefaultTrue(env("CRONJOB_NEXT_RUN_ENABLE"))) },
+        CRONJOB_NEXT_RUN_MINUTES: { value: String(num(env("CRONJOB_NEXT_RUN_MINUTES"), config().next_run_minutes)) },
+        CRONJOB_RUN_GROUP: { value: env("CRONJOB_RUN_GROUP", ctx.runGroup) },
+      },
+    };
+    const headers = [`Authorization: ${authValue}`, "Content-Type: application/json"];
+    return { type: "azure", url, authValue, body, headers, pat };
+  }
+
+  // GitHub target (mặc định)
+  const pat = resolveDispatchPat();
+  const v = env("CRONJOB_GITHUB_API_VERSION", config().github_api_version);
+  const authValue = `Bearer ${pat}`;
+  return {
+    type: "github",
+    url: githubUrl(ctx),
+    authValue,
+    body: dispatchBody(ctx),
+    headers: [`Authorization: ${authValue}`, "Accept: application/vnd.github+json", `X-GitHub-Api-Version: ${v}`, "Content-Type: application/json"],
+    pat,
+  };
 }
 
 /**
@@ -421,8 +521,8 @@ function getScheduleParts(nextRunAt, tz) {
 async function ensureCronJobOrg(ctx, nextRunAt) {
   if (!channelConfigured("CRONJOB_CRONJOBORG_ENABLE", ["CRONJOB_CRONJOBORG_API_KEY"])) return null;
   const apiKey = env("CRONJOB_CRONJOBORG_API_KEY");
-  const pat = resolveDispatchPat();
-  if (!apiKey || !pat) throw new Error("cron-job.org needs CRONJOB_CRONJOBORG_API_KEY and a dispatch PAT.");
+  const target = externalTargetConfig(ctx);
+  if (!apiKey || !target.pat) throw new Error("cron-job.org needs CRONJOB_CRONJOBORG_API_KEY and a dispatch PAT.");
   const tz = env("CRONJOB_TZ", "Asia/Bangkok");
 
   let scheduleField;
@@ -450,22 +550,24 @@ async function ensureCronJobOrg(ctx, nextRunAt) {
     };
   }
 
+  const extHeaders = {};
+  for (const h of target.headers) {
+    const colon = h.indexOf(":");
+    if (colon > 0) extHeaders[h.slice(0, colon).trim()] = h.slice(colon + 1).trim();
+  }
+
   const body = {
     job: {
       title: env("CRONJOB_JOB_TITLE", "proxy-stack-keepalive"),
       enabled: true,
       saveResponses: true,
-      url: githubUrl(ctx),
+      url: target.url,
       requestMethod: 1,
       redirectSuccess: true,
       schedule: scheduleField,
       extendedData: {
-        headers: {
-          Authorization: `Bearer ${pat}`,
-          Accept: "application/vnd.github+json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(dispatchBody(ctx)),
+        headers: extHeaders,
+        body: JSON.stringify(target.body),
       },
       notification: {
         onFailure: true,
@@ -486,9 +588,9 @@ async function ensureCronJobOrg(ctx, nextRunAt) {
 async function ensureEasyCron(ctx, nextRunAt) {
   if (!channelConfigured("CRONJOB_EASYCRON_ENABLE", ["CRONJOB_EASYCRON_API_KEY"])) return null;
   const apiKey = env("CRONJOB_EASYCRON_API_KEY");
-  const pat = resolveDispatchPat();
+  const target = externalTargetConfig(ctx);
   if (!apiKey) throw new Error("EasyCron needs CRONJOB_EASYCRON_API_KEY.");
-  if (!pat) throw new Error("EasyCron needs CRONJOB_DISPATCH_PAT (or GITHUB_TOKEN / Azure System.AccessToken).");
+  if (!target.pat) throw new Error("EasyCron needs a dispatch PAT (CRONJOB_DISPATCH_PAT / CRONJOB_DISPATCH_PAT_AZURE / GITHUB_TOKEN / SYSTEM_ACCESSTOKEN / AZURE_DEVOPS_PAT).");
   const cfg = config().channels.easycron;
   const tz = env("CRONJOB_TZ", "Asia/Bangkok");
 
@@ -504,13 +606,13 @@ async function ensureEasyCron(ctx, nextRunAt) {
   return httpJson("easycron:create", env("CRONJOB_EASYCRON_API", "https://api.easycron.com/v1/cron-jobs"), {
     headers: { "X-API-Key": apiKey },
     body: {
-      url: githubUrl(ctx),
+      url: target.url,
       cron_expression: cronExpression,
       timezone_from: 2,
       timezone: tz,
       http_method: "POST",
-      http_headers: dispatchHeaders().join("\n"),
-      http_message_body: JSON.stringify(dispatchBody(ctx)),
+      http_headers: target.headers.join("\n"),
+      http_message_body: JSON.stringify(target.body),
       timeout: Number(env("CRONJOB_EASYCRON_TIMEOUT", cfg.timeout)),
       status: 1,
       cron_job_name: env("CRONJOB_JOB_TITLE", "proxy-stack-keepalive"),
@@ -526,9 +628,9 @@ async function ensureEasyCron(ctx, nextRunAt) {
 async function ensureFastCron(ctx, nextRunAt) {
   if (!channelConfigured("CRONJOB_FASTCRON_ENABLE", ["CRONJOB_FASTCRON_TOKEN"])) return null;
   const token = env("CRONJOB_FASTCRON_TOKEN");
-  const pat = resolveDispatchPat();
+  const target = externalTargetConfig(ctx);
   if (!token) throw new Error("FastCron needs CRONJOB_FASTCRON_TOKEN.");
-  if (!pat) throw new Error("FastCron needs CRONJOB_DISPATCH_PAT (or GITHUB_TOKEN / Azure System.AccessToken).");
+  if (!target.pat) throw new Error("FastCron needs a dispatch PAT (CRONJOB_DISPATCH_PAT / CRONJOB_DISPATCH_PAT_AZURE / GITHUB_TOKEN / SYSTEM_ACCESSTOKEN / AZURE_DEVOPS_PAT).");
   const cfg = config().channels.fastcron;
   const tz = env("CRONJOB_TZ", "Asia/Bangkok");
 
@@ -544,14 +646,14 @@ async function ensureFastCron(ctx, nextRunAt) {
   return httpJson("fastcron:create", env("CRONJOB_FASTCRON_API", "https://www.fastcron.com/api/v1/cron_add"), {
     headers: { Authorization: `Bearer ${token}` },
     body: {
-      url: githubUrl(ctx),
+      url: target.url,
       expression,
       timezone: tz,
       timeout: Number(env("CRONJOB_FASTCRON_TIMEOUT", cfg.timeout)),
       instances: 1,
       httpMethod: "POST",
-      postData: JSON.stringify(dispatchBody(ctx)),
-      httpHeaders: dispatchHeaders().join("\r\n"),
+      postData: JSON.stringify(target.body),
+      httpHeaders: target.headers.join("\r\n"),
       name: env("CRONJOB_JOB_TITLE", "proxy-stack-keepalive"),
       notify: false,
     },
@@ -566,40 +668,39 @@ async function ensureFastCron(ctx, nextRunAt) {
 async function ensureQstash(ctx, nextRunAt) {
   if (!channelConfigured("CRONJOB_QSTASH_ENABLE", ["CRONJOB_QSTASH_TOKEN"])) return null;
   const token = env("CRONJOB_QSTASH_TOKEN");
-  const pat = resolveDispatchPat();
-  if (!token || !pat) throw new Error("QStash needs CRONJOB_QSTASH_TOKEN and a dispatch PAT.");
-  const destination = encodeURIComponent(githubUrl(ctx));
+  const target = externalTargetConfig(ctx);
+  if (!token || !target.pat) throw new Error("QStash needs CRONJOB_QSTASH_TOKEN and a dispatch PAT.");
+  const destination = encodeURIComponent(target.url);
   const qstashBase = env("CRONJOB_QSTASH_API", "https://qstash.upstash.io");
-  const apiVersion = env("CRONJOB_GITHUB_API_VERSION", config().github_api_version);
+
+  function qstashHeaders(extra) {
+    const h = {
+      Authorization: `Bearer ${token}`,
+      "Upstash-Method": "POST",
+      "Upstash-Forward-Authorization": target.authValue,
+      "Upstash-Forward-Content-Type": "application/json",
+    };
+    if (target.type === "github") {
+      h["Upstash-Forward-Accept"] = "application/vnd.github+json";
+      h["Upstash-Forward-X-GitHub-Api-Version"] = env("CRONJOB_GITHUB_API_VERSION", config().github_api_version);
+    }
+    return { ...h, ...extra };
+  }
 
   if (nextRunAt) {
     const notBefore = Math.floor(nextRunAt.getTime() / 1000);
     log(`[qstash] one-shot publish Upstash-Not-Before=${notBefore} (${nextRunAt.toISOString()})`);
     return httpJson("qstash:publish", `${qstashBase}/v2/publish/${destination}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Upstash-Not-Before": String(notBefore),
-        "Upstash-Method": "POST",
-        "Upstash-Forward-Authorization": `Bearer ${pat}`,
-        "Upstash-Forward-Accept": "application/vnd.github+json",
-        "Upstash-Forward-X-GitHub-Api-Version": apiVersion,
-        "Upstash-Forward-Content-Type": "application/json",
-      },
-      body: dispatchBody(ctx),
+      headers: qstashHeaders({ "Upstash-Not-Before": String(notBefore) }),
+      body: target.body,
     });
   } else {
     return httpJson("qstash:schedule", `${qstashBase}/v2/schedules/${destination}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
+      headers: qstashHeaders({
         "Upstash-Cron": env("CRONJOB_QSTASH_CRON", config().channels.qstash.cron),
-        "Upstash-Method": "POST",
         "Upstash-Schedule-Id": env("CRONJOB_QSTASH_SCHEDULE_ID", env("CRONJOB_JOB_TITLE", "proxy-stack-keepalive")),
-        "Upstash-Forward-Authorization": `Bearer ${pat}`,
-        "Upstash-Forward-Accept": "application/vnd.github+json",
-        "Upstash-Forward-X-GitHub-Api-Version": apiVersion,
-        "Upstash-Forward-Content-Type": "application/json",
-      },
-      body: dispatchBody(ctx),
+      }),
+      body: target.body,
     });
   }
 }
@@ -612,9 +713,10 @@ async function callWebhook(ctx, nextRunAt) {
   const url = env("CRONJOB_WEBHOOK_URL");
   if (!url) throw new Error("Webhook needs CRONJOB_WEBHOOK_URL.");
   const token = env("CRONJOB_WEBHOOK_TOKEN");
+  const target = externalTargetConfig(ctx);
   const payload = {
-    url: githubUrl(ctx),
-    body: dispatchBody(ctx),
+    target: { type: target.type, url: target.url },
+    body: target.body,
     ...(nextRunAt ? { scheduled_at: nextRunAt.toISOString() } : {}),
   };
   return httpJson("webhook", url, { headers: token ? { Authorization: `Bearer ${token}` } : {}, body: payload });
