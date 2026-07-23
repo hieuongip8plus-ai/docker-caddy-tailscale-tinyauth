@@ -242,7 +242,7 @@ function getAzurePipelines(ctx) {
   if (indexed.length > 0) return indexed;
   const org = env("CRONJOB_AZURE_ORG") || (ctx.provider === "azure" ? ctx.owner : "") || "";
   const project = env("CRONJOB_AZURE_PROJECT") || (ctx.provider === "azure" ? ctx.project : "") || "";
-  const pipelineId = env("CRONJOB_AZURE_PIPELINE_ID", "");
+  const pipelineId = env("CRONJOB_AZURE_PIPELINE_ID") || (ctx.provider === "azure" ? (process.env.SYSTEM_DEFINITIONID || "") : "") || "";
   const pat = env("CRONJOB_DISPATCH_PAT_AZURE") || env("CRONJOB_DISPATCH_PAT") || env("SYSTEM_ACCESSTOKEN") || env("AZURE_DEVOPS_PAT") || "";
   const hours = env("CRONJOB_HOURS");
   if (!org || !project || !pipelineId) return [];
@@ -435,10 +435,12 @@ function dispatchHeaders() {
  * Auth: GitHub → Bearer, Azure → Basic base64(:PAT) — user chỉ cần set raw PAT.
  */
 function externalTargetConfig(ctx) {
-  const azurePipelineId = env("CRONJOB_AZURE_PIPELINE_ID");
+  const azurePipelineId = env("CRONJOB_AZURE_PIPELINE_ID") || (ctx.provider === "azure" ? (process.env.SYSTEM_DEFINITIONID || "") : "") || "";
+
+  // -- Azure target --
   if (azurePipelineId) {
-    const org = env("CRONJOB_AZURE_ORG") || ctx.owner || "";
-    const project = env("CRONJOB_AZURE_PROJECT") || ctx.project || "";
+    const org = env("CRONJOB_AZURE_ORG") || (ctx.provider === "azure" ? ctx.owner : "") || "";
+    const project = env("CRONJOB_AZURE_PROJECT") || (ctx.provider === "azure" ? ctx.project : "") || "";
     const pat = env("CRONJOB_DISPATCH_PAT_AZURE") || env("CRONJOB_DISPATCH_PAT") || env("SYSTEM_ACCESSTOKEN") || env("AZURE_DEVOPS_PAT") || "";
     const baseUrl = env("CRONJOB_AZURE_API", `https://dev.azure.com/${org}/${project}`);
     const url = `${baseUrl}/_apis/pipelines/${azurePipelineId}/runs?api-version=7.1`;
@@ -455,7 +457,7 @@ function externalTargetConfig(ctx) {
     return { type: "azure", url, authValue, body, headers, pat };
   }
 
-  // GitHub target (mặc định)
+  // -- GitHub target (mặc định) --
   const pat = resolveDispatchPat();
   const v = env("CRONJOB_GITHUB_API_VERSION", config().github_api_version);
   const authValue = `Bearer ${pat}`;
