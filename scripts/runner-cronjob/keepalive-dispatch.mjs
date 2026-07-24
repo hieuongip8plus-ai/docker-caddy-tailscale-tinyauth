@@ -388,52 +388,6 @@ async function azureDispatchWithRetry(label, url, pat, body, varNames) {
   return res;
 }
 
-/**
- * Pre-flight: kiểm tra và tự động cấu hình Azure pipeline variables
- * "Settable at queue time" trước khi các external channels lưu body.
- * Gọi 1 lần duy nhất ở đầu markStart().
- */
-async function azurePreFlightSettable(ctx) {
-  const pipelines = getAzurePipelines(ctx);
-  if (pipelines.length === 0) return;
-
-  const varNames = ["CRONJOB_RUN_GROUP", "CRONJOB_NEXT_RUN_ENABLE", "CRONJOB_NEXT_RUN_MINUTES"];
-  const runGroup = env("CRONJOB_RUN_GROUP", ctx.runGroup);
-  const nextEnable = String(boolDefaultTrue(env("CRONJOB_NEXT_RUN_ENABLE", env("CRONJON_NEXT_RUN_ENABLE"))));
-  const nextMinutes = String(num(env("CRONJOB_NEXT_RUN_MINUTES", env("CRONJON_NEXT_RUN_MINUTES")), config().next_run_minutes));
-
-  for (const p of pipelines) {
-    if (!p.pat || !p.org || !p.project || !p.pipelineId) continue;
-    const baseUrl = env("CRONJOB_AZURE_API", `https://dev.azure.com/${p.org}/${p.project}`);
-    const url = `${baseUrl}/_apis/pipelines/${p.pipelineId}/runs?api-version=7.1`;
-    const body = {
-      resources: {},
-      variables: {
-        CRONJOB_RUN_GROUP: { value: runGroup },
-        CRONJOB_NEXT_RUN_ENABLE: { value: nextEnable },
-        CRONJOB_NEXT_RUN_MINUTES: { value: nextMinutes },
-      },
-    };
-
-    log(`[azure:pre-flight] testing dispatch to ${p.org}/${p.project}/${p.pipelineId}...`);
-    const res = await azureJson(`azure:pre-flight:${p.org}/${p.project}`, url, p.pat, body);
-
-    if (!res.ok && res.status === 400) {
-      const varName = parseNotSettableVariable(res.text);
-      if (varName) {
-        log(`[azure:pre-flight] variable "${varName}" not settable, auto-provisioning...`);
-        await azureEnsureSettableVariables(p.pat, baseUrl, p.pipelineId, varNames);
-      } else {
-        log(`[azure:pre-flight] unexpected 400 error:`, res.text);
-      }
-    } else if (res.ok) {
-      log(`[azure:pre-flight] dispatch OK — variables already settable.`);
-    } else {
-      log(`[azure:pre-flight] unexpected error: ${res.status}`, res.text);
-    }
-  }
-}
-
 async function azureDispatch(ctx) {
   const pipelines = getAzurePipelines(ctx);
   const tz = env("CRONJOB_TZ", "Asia/Bangkok");
@@ -930,9 +884,6 @@ async function markStart() {
 
   const ctx = workflowContext();
   const externalResults = [];
-
-  // Pre-flight: ensure Azure pipeline variables are settable at queue time
-  await azurePreFlightSettable(ctx);
 
   if (!boolDefaultTrue(enabledRaw)) {
     log("[mark-start] CRONJOB_NEXT_RUN_ENABLE=false, skip external channel dispatch.");
