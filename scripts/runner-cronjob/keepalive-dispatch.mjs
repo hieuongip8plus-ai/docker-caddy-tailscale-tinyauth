@@ -297,6 +297,143 @@ async function azureJson(name, url, token, body) {
   });
 }
 
+/**
+ * PATCH request to Azure DevOps API with Basic auth.
+ */
+async function azurePatch(name, url, token, body) {
+  return httpJson(name, url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`:${token}`).toString("base64")}`,
+      "Content-Type": "application/json",
+    },
+    body,
+  });
+}
+
+/**
+ * Tự động cấu hình variables "Settable at queue time" trên Azure pipeline.
+ * PATCH pipeline definition: thêm variable với allowOverride: true.
+ * Dùng PAT có sẵn trong env để gọi API.
+ */
+async function azureEnsureSettableVariables(pat, baseUrl, pipelineId, varNames) {
+  const getUrl = `${baseUrl}/_apis/pipelines/${pipelineId}?api-version=7.1`;
+  log(`[azure:ensure-settable] GET ${getUrl}`);
+  const getRes = await azureJson("azure:get-pipeline", getUrl, pat);
+  if (!getRes.ok) {
+    log(`[azure:ensure-settable] Failed to GET pipeline: ${getRes.status}`, getRes.text);
+    return false;
+  }
+
+  const pipeline = JSON.parse(getRes.text);
+  if (!pipeline.variables) pipeline.variables = {};
+
+  let changed = false;
+  for (const name of varNames) {
+    if (!pipeline.variables[name] || !pipeline.variables[name].allowOverride) {
+      pipeline.variables[name] = { value: pipeline.variables[name]?.value || "", allowOverride: true };
+      changed = true;
+      log(`[azure:ensure-settable] Setting allowOverride=true for variable: ${name}`);
+    }
+  }
+
+  if (!changed) {
+    log(`[azure:ensure-settable] All variables already settable.`);
+    return true;
+  }
+
+  const patchUrl = `${baseUrl}/_apis/pipelines/${pipelineId}?api-version=7.1`;
+  log(`[azure:ensure-settable] PATCH ${patchUrl}`);
+  const patchRes = await azurePatch("azure:patch-pipeline", patchUrl, pat, pipeline);
+  if (!patchRes.ok) {
+    log(`[azure:ensure-settable] Failed to PATCH pipeline: ${patchRes.status}`, patchRes.text);
+    return false;
+  }
+
+  log(`[azure:ensure-settable] Pipeline updated successfully.`);
+  return true;
+}
+
+/**
+ * Parse error message "Variable 'X' is not settable at queue time" → returns variable name.
+ */
+function parseNotSettableVariable(errorMessage) {
+  const match = errorMessage?.match(/variable\s+['"]?(\w+)['"]?\s+is\s+not\s+settable/i);
+  return match ? match[1] : null;
+}
+
+/**
+ * Dispatch Azure pipeline with variables + auto-retry if "not settable at queue time".
+ */
+async function azureDispatchWithRetry(label, url, pat, body, varNames) {
+  const res = await azureJson(`azure:dispatch:${label}`, url, pat, body);
+
+  if (!res.ok && res.status === 400) {
+    const varName = parseNotSettableVariable(res.text);
+    if (varName) {
+      log(`[azure:dispatch] ${label} variable "${varName}" not settable, auto-provisioning...`);
+      const baseUrl = url.replace(/\/_apis\/pipelines\/\d+\/runs\?.*$/, "");
+      const pipelineMatch = url.match(/\/_apis\/pipelines\/(\d+)\//);
+      const pipelineId = pipelineMatch?.[1];
+      if (pipelineId) {
+        const ensured = await azureEnsureSettableVariables(pat, baseUrl, pipelineId, varNames);
+        if (ensured) {
+          log(`[azure:dispatch] ${label} retrying dispatch after auto-provision...`);
+          return azureJson(`azure:dispatch:${label}`, url, pat, body);
+        }
+      }
+    }
+  }
+
+  return res;
+}
+
+/**
+ * Pre-flight: kiểm tra và tự động cấu hình Azure pipeline variables
+ * "Settable at queue time" trước khi các external channels lưu body.
+ * Gọi 1 lần duy nhất ở đầu markStart().
+ */
+async function azurePreFlightSettable(ctx) {
+  const pipelines = getAzurePipelines(ctx);
+  if (pipelines.length === 0) return;
+
+  const varNames = ["CRONJOB_RUN_GROUP", "CRONJOB_NEXT_RUN_ENABLE", "CRONJOB_NEXT_RUN_MINUTES"];
+  const runGroup = env("CRONJOB_RUN_GROUP", ctx.runGroup);
+  const nextEnable = String(boolDefaultTrue(env("CRONJOB_NEXT_RUN_ENABLE", env("CRONJON_NEXT_RUN_ENABLE"))));
+  const nextMinutes = String(num(env("CRONJOB_NEXT_RUN_MINUTES", env("CRONJON_NEXT_RUN_MINUTES")), config().next_run_minutes));
+
+  for (const p of pipelines) {
+    if (!p.pat || !p.org || !p.project || !p.pipelineId) continue;
+    const baseUrl = env("CRONJOB_AZURE_API", `https://dev.azure.com/${p.org}/${p.project}`);
+    const url = `${baseUrl}/_apis/pipelines/${p.pipelineId}/runs?api-version=7.1`;
+    const body = {
+      resources: {},
+      variables: {
+        CRONJOB_RUN_GROUP: { value: runGroup },
+        CRONJOB_NEXT_RUN_ENABLE: { value: nextEnable },
+        CRONJOB_NEXT_RUN_MINUTES: { value: nextMinutes },
+      },
+    };
+
+    log(`[azure:pre-flight] testing dispatch to ${p.org}/${p.project}/${p.pipelineId}...`);
+    const res = await azureJson(`azure:pre-flight:${p.org}/${p.project}`, url, p.pat, body);
+
+    if (!res.ok && res.status === 400) {
+      const varName = parseNotSettableVariable(res.text);
+      if (varName) {
+        log(`[azure:pre-flight] variable "${varName}" not settable, auto-provisioning...`);
+        await azureEnsureSettableVariables(p.pat, baseUrl, p.pipelineId, varNames);
+      } else {
+        log(`[azure:pre-flight] unexpected 400 error:`, res.text);
+      }
+    } else if (res.ok) {
+      log(`[azure:pre-flight] dispatch OK — variables already settable.`);
+    } else {
+      log(`[azure:pre-flight] unexpected error: ${res.status}`, res.text);
+    }
+  }
+}
+
 async function azureDispatch(ctx) {
   const pipelines = getAzurePipelines(ctx);
   const tz = env("CRONJOB_TZ", "Asia/Bangkok");
@@ -331,17 +468,21 @@ async function azureDispatch(ctx) {
     }
 
     const url = `${env("CRONJOB_AZURE_API", `https://dev.azure.com/${p.org}/${p.project}`)}/_apis/pipelines/${p.pipelineId}/runs?api-version=7.1`;
+    const runGroup = env("CRONJOB_RUN_GROUP", ctx.runGroup);
+    const nextEnable = String(boolDefaultTrue(env("CRONJOB_NEXT_RUN_ENABLE", env("CRONJON_NEXT_RUN_ENABLE"))));
+    const nextMinutes = String(num(env("CRONJOB_NEXT_RUN_MINUTES", env("CRONJON_NEXT_RUN_MINUTES")), config().next_run_minutes));
+    const varNames = ["CRONJOB_RUN_GROUP", "CRONJOB_NEXT_RUN_ENABLE", "CRONJOB_NEXT_RUN_MINUTES"];
     const body = {
       resources: {},
       variables: {
-        CRONJOB_NEXT_RUN_ENABLE: { value: String(boolDefaultTrue(env("CRONJOB_NEXT_RUN_ENABLE"))) },
-        CRONJOB_NEXT_RUN_MINUTES: { value: String(num(env("CRONJOB_NEXT_RUN_MINUTES"), config().next_run_minutes)) },
-        CRONJOB_RUN_GROUP: { value: env("CRONJOB_RUN_GROUP", ctx.runGroup) },
+        CRONJOB_RUN_GROUP: { value: runGroup },
+        CRONJOB_NEXT_RUN_ENABLE: { value: nextEnable },
+        CRONJOB_NEXT_RUN_MINUTES: { value: nextMinutes },
       },
     };
 
     try {
-      const res = await azureJson(`azure:dispatch:${p.org}/${p.project}`, url, p.pat, body);
+      const res = await azureDispatchWithRetry(label, url, p.pat, body, varNames);
       dispatches.push({ name: label, ok: res.ok, status: res.status, response: redact(res.text || "") });
     } catch (e) {
       log(`[azure:dispatch] ${label} error`, e.stack || e.message);
@@ -454,12 +595,15 @@ function externalTargetConfig(ctx) {
     const baseUrl = env("CRONJOB_AZURE_API", `https://dev.azure.com/${org}/${project}`);
     const url = `${baseUrl}/_apis/pipelines/${azurePipelineId}/runs?api-version=7.1`;
     const authValue = `Basic ${Buffer.from(`:${pat}`).toString("base64")}`;
+    const runGroup = env("CRONJOB_RUN_GROUP", ctx.runGroup);
+    const nextEnable = String(boolDefaultTrue(env("CRONJOB_NEXT_RUN_ENABLE", env("CRONJON_NEXT_RUN_ENABLE"))));
+    const nextMinutes = String(num(env("CRONJOB_NEXT_RUN_MINUTES", env("CRONJON_NEXT_RUN_MINUTES")), config().next_run_minutes));
     const body = {
       resources: {},
       variables: {
-        CRONJOB_NEXT_RUN_ENABLE: { value: String(boolDefaultTrue(env("CRONJOB_NEXT_RUN_ENABLE"))) },
-        CRONJOB_NEXT_RUN_MINUTES: { value: String(num(env("CRONJOB_NEXT_RUN_MINUTES"), config().next_run_minutes)) },
-        CRONJOB_RUN_GROUP: { value: env("CRONJOB_RUN_GROUP", ctx.runGroup) },
+        CRONJOB_RUN_GROUP: { value: runGroup },
+        CRONJOB_NEXT_RUN_ENABLE: { value: nextEnable },
+        CRONJOB_NEXT_RUN_MINUTES: { value: nextMinutes },
       },
     };
     const headers = [`Authorization: ${authValue}`, "Content-Type: application/json"];
@@ -786,6 +930,9 @@ async function markStart() {
 
   const ctx = workflowContext();
   const externalResults = [];
+
+  // Pre-flight: ensure Azure pipeline variables are settable at queue time
+  await azurePreFlightSettable(ctx);
 
   if (!boolDefaultTrue(enabledRaw)) {
     log("[mark-start] CRONJOB_NEXT_RUN_ENABLE=false, skip external channel dispatch.");
