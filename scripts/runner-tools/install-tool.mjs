@@ -194,9 +194,10 @@ function installTool(tool) {
           continue;
         }
 
+        const strip = m.tarStripComponents ?? 0;
         const extractCmd = isZip
           ? `unzip -o ${JSON.stringify(archive)} -d ${JSON.stringify(cacheDir)}`
-          : `tar xzf ${JSON.stringify(archive)} -C ${JSON.stringify(cacheDir)} --strip-components=0`;
+          : `tar xzf ${JSON.stringify(archive)} -C ${JSON.stringify(cacheDir)} --strip-components=${strip}`;
         const ext = shell(extractCmd);
         shell(`rm -f ${JSON.stringify(archive)}`);
         if (!ext.ok) {

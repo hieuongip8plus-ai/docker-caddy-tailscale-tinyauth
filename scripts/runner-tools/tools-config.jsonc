@@ -78,6 +78,30 @@
           "run": "npm install -g @tltdh61/dotenvrtdb"
         }
       ]
+    },
+    {
+      "name": "tailscale",
+      "version": "1.98.9",
+      "verify": "tailscale version",
+      "methods": [
+        {
+          "id": "binary-download",
+          "type": "download",
+          "url": {
+            "linux-x64": "https://pkgs.tailscale.com/stable/tailscale_${version}_amd64.tgz",
+            "linux-arm64": "https://pkgs.tailscale.com/stable/tailscale_${version}_arm64.tgz",
+            "linux-arm": "https://pkgs.tailscale.com/stable/tailscale_${version}_arm.tgz",
+            "linux-ia32": "https://pkgs.tailscale.com/stable/tailscale_${version}_386.tgz",
+            "linux-riscv64": "https://pkgs.tailscale.com/stable/tailscale_${version}_riscv64.tgz"
+          },
+          "binary": "tailscale",
+          "tarStripComponents": 1
+        },
+        {
+          "id": "official-script",
+          "run": "curl -fsSL https://tailscale.com/install.sh | sh"
+        }
+      ]
     }
   ]
 }

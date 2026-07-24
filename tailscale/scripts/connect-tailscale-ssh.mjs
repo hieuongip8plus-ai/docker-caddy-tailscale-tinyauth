@@ -94,7 +94,8 @@ async function main() {
 
   const CLIENT_ID = process.env.TS_CLIENT_ID || "";
   const CLIENT_SECRET = process.env.TS_CLIENT_SECRET || "";
-  const TAGS = process.env.TS_TAGS || "tag:ci";
+  // Normalize: strip spaces around commas so "tag:container, tag:ci" → "tag:container,tag:ci"
+  const TAGS = (process.env.TS_TAGS || "tag:ci").replace(/,\s+/g, ",");
   const HOSTNAME = sanitizeHostname(process.env.TS_HOSTNAME || `proxy-stack-${detectCiIdentity()}`);
   const EXPIRY_SECONDS = Number(process.env.TS_EXPIRY_SECONDS || 3600);
   const EXTRA_ARGS = process.env.TS_EXTRA_ARGS || "";
